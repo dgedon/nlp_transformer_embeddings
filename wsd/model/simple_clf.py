@@ -1,5 +1,5 @@
 import torch.nn as nn
-
+import torch
 
 class ModelSimpleEmb(nn.Module):
     def __init__(self, config, voc_size):
@@ -16,6 +16,16 @@ class ModelSimpleEmb(nn.Module):
         embedded = self.embedding(x)
         cBoW = embedded.mean(dim=1)
         out = self.dropout(cBoW)
+        """
+        # adapt to correct size and type
+        word_pos = word_pos.unsqueeze(1).type(torch.float32)
+
+        # this is the cBoW representation
+        embedded = self.embedding(x)
+        cBoW = embedded.mean(dim=1)
+        out = self.dropout(cBoW)
+        # concatenate with position
+        out = torch.cat([out, word_pos], 1)"""
 
         return out
 

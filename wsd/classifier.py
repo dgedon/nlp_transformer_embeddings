@@ -150,10 +150,12 @@ class TextClassifier:
             scores = self.model(model_inp)
             # Compute the loss for this batch.
             loss = self.loss_fun(scores, y_batch)
-            # Backward pass
-            loss.backward()
-            # Optimize
-            self.optimizer.step()
+
+            if type.lower() == 'train':
+                # Backward pass
+                loss.backward()
+                # Optimize
+                self.optimizer.step()
 
             # Update
             total_loss += loss.detach().cpu().numpy()
