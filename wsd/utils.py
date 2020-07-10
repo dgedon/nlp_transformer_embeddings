@@ -101,9 +101,10 @@ class DocumentBatcher:
         # How long is the longest document in this batch?
         max_len = max(len(x) for x, _, _ in data)
 
-        # Build the document tensor. We pad the shorter documents so that all documents
-        # have the same length.
+        # Build the document tensor. We pad the shorter documents so that all documents have the same length.
         x_padded = torch.as_tensor([x + [self.pad] * (max_len - len(x)) for x, _, _ in data])
+        # generate padding mask (0 for non padded, 1 for padded)
+        src_key_padding_mask = torch.as_tensor([len(x)*[0] + [1] * (max_len - len(x)) for x, _, _ in data]).bool()
 
         # Build the label tensor.
         y = torch.as_tensor([y for _, y, _ in data])
@@ -111,4 +112,4 @@ class DocumentBatcher:
         # Build the position tensor.
         word_pos = torch.as_tensor([pos for _, _, pos in data])
 
-        return x_padded, y, word_pos
+        return x_padded, y, word_pos, src_key_padding_mask

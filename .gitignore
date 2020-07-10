@@ -2,3 +2,4 @@ __pycache__/
 /.idea/
 wsd/data/a1_test/*
 wsd/output_2020*
+wsd/pretrained*

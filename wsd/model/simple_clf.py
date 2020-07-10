@@ -12,20 +12,10 @@ class ModelSimpleEmb(nn.Module):
         self.dropout = nn.Dropout(self.dropout)
 
     def forward(self, src):
-        x, word_pos = src
+        x, word_pos, _ = src
         embedded = self.embedding(x)
         cBoW = embedded.mean(dim=1)
         out = self.dropout(cBoW)
-        """
-        # adapt to correct size and type
-        word_pos = word_pos.unsqueeze(1).type(torch.float32)
-
-        # this is the cBoW representation
-        embedded = self.embedding(x)
-        cBoW = embedded.mean(dim=1)
-        out = self.dropout(cBoW)
-        # concatenate with position
-        out = torch.cat([out, word_pos], 1)"""
 
         return out
 

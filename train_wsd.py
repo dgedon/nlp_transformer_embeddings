@@ -6,6 +6,7 @@ from tqdm import tqdm
 from warnings import warn
 import datetime
 import json
+import numpy as np
 
 # user defined inputs
 from wsd.classifier import TextClassifier, make_predictions
@@ -24,8 +25,8 @@ if __name__ == '__main__':
                                help='random seed for number generator (default: 2)')
     config_parser.add_argument('--epochs', type=int, default=100,
                                help='maximum number of epochs (default: 200)')
-    config_parser.add_argument('--batch_size', type=int, default=128,
-                               help='batch size (default: 128).')
+    config_parser.add_argument('--batch_size', type=int, default=32,
+                               help='batch size (default: 32).')
     config_parser.add_argument('--valid_split', type=float, default=0.30,
                                help='fraction of the data used for validation (default: 0.3).')
     config_parser.add_argument('--lr', type=float, default=1e-3,
@@ -35,17 +36,16 @@ if __name__ == '__main__':
     config_parser.add_argument("--lr_factor", type=float, default=0.1,
                                help='reducing factor for the lr in a plateau (default: 0.1)')
     # Model parameters
-    config_parser.add_argument("--model_type", type=str, default='simple_emb',
-                               help='model type. Options: simple_emb')
+    config_parser.add_argument("--model_type", type=str, default='transf_word',
+                               help='model type. Options: simple_emb, transf_word')
     config_parser.add_argument("--max_voc_size", type=int, default=None,
                                help='maximal size of the vocabulary (default: None)')
     config_parser.add_argument("--emb_dim", type=int, default=128,
                                help='dimension of embeddings (default: 128)')
     config_parser.add_argument("--dropout", type=float, default=0.3,
-                               help='dropout value (default: 0.3)')
+                               help='dropout rate (default: 0.3)')
     config_parser.add_argument("--hidden_size_simpleclf", type=int, default=500,
                                help='hidden dimension of simple classifier (default: 500)')
-
     args, rem_args = config_parser.parse_known_args()
 
     # System setting
@@ -58,7 +58,7 @@ if __name__ == '__main__':
                             help='data file for validation.')
     sys_parser.add_argument('--cuda', action='store_true',
                             help='use cuda for computations. (default: False)')
-    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/',
+    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/pretrained_word',
                             help='output folder. If we pass /PATH/TO/FOLDER/ ending with `/`,'
                                  'it creates a folder `output_YYYY-MM-DD_HH_MM_SS_MMMMMM` inside it'
                                  'and save the content inside it. If it does not ends with `/`, the content is saved'
@@ -86,9 +86,26 @@ if __name__ == '__main__':
         pass
     with open(os.path.join(folder, 'config.json'), 'w') as f:
         json.dump(vars(args), f, indent='\t')
+    # Check if there is pretrained model in the given folder
+    if args.model_type.lower() not in ['simple_emb']:
+        try:
+            ckpt_pretrain_stage = torch.load(os.path.join(folder, 'pretrain_model.pth'),
+                                             map_location=lambda storage, loc: storage)
+            config_pretrain_stage = os.path.join(folder, 'pretrain_config.json')
+            with open(config_pretrain_stage, 'r') as f:
+                config_dict_pretrain_stage = json.load(f)
+            tqdm.write("Found pretrained model!")
+            # adapt voc size
+            args.max_voc_size = config_dict_pretrain_stage['max_voc_size']
+        except:
+            ckpt_pretrain_stage = None
+            config_dict_pretrain_stage = None
+            pretrain_ids = []
+            tqdm.write("Did not found pretrained model!")
 
     # Set seed
     torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
     tqdm.write("Done!")
     ###################################
@@ -104,7 +121,6 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Load data and pre-process...")
 
-    # preprocess data
     train_loader, valid_loader = clf.preprocess(data_path=os.path.join(settings.data_folder, settings.data_file_train))
 
     tqdm.write("Done!")
@@ -113,7 +129,7 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define model...")
 
-    model = get_model(vars(args), clf.voc_size, clf.n_classes)
+    model = get_model(vars(args), clf.voc_size, clf.n_classes, config_dict_pretrain_stage, ckpt_pretrain_stage)
     model.to(device=device)
     clf.set_model(model)
 
@@ -160,13 +176,13 @@ if __name__ == '__main__':
         tqdm.write("Test the model:")
 
         data_test_path = os.path.join(settings.data_folder, settings.data_file_test)
-        make_predictions(clf, data_test_path)
+        make_predictions(clf, data_test_path, folder)
 
         tqdm.write("Finished script!")
     except:
         tqdm.write("Model training interrupted. Test the best model:")
 
         data_test_path = os.path.join(settings.data_folder, settings.data_file_test)
-        make_predictions(clf, data_test_path)
+        make_predictions(clf, data_test_path, folder)
 
         tqdm.write("Finished script!")

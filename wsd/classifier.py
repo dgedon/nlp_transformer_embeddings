@@ -80,8 +80,8 @@ class TextClassifier:
         best_valid_acc = -np.Inf
         for ep in range(self.epochs):
             # Train and evaluate
-            train_loss, train_acc = self.epoch(ep, train_loader, 'train')
-            valid_loss, valid_acc = self.epoch(ep, valid_loader, 'valid')
+            train_loss, train_acc = self.epoch(ep, train_loader, do_train=True)
+            valid_loss, valid_acc = self.epoch(ep, valid_loader, do_train=False)
 
             # Get learning rate
             for param_group in self.optimizer.param_groups:
@@ -118,16 +118,17 @@ class TextClassifier:
                            os.path.join(folder, 'final_model.pth'))
                 tqdm.write("Save model (last)!")
 
-    def epoch(self, ep, batches, type):
+    def epoch(self, ep, batches, do_train):
         """Runs the neural network for one epoch, using the given batches.
         If an optimizer is provided, this is training data and we will update the model
         after each batch. Otherwise, this is assumed to be validation data.
 
         Returns the loss and accuracy over the epoch."""
-        if type.lower() == 'train':
+        if do_train:
             self.model.train()
-        elif type.lower() == 'valid':
+        else:
             self.model.eval()
+        str_name = 'train' if do_train else 'valid'
 
         n_correct = 0
         n_instances = 0
@@ -135,23 +136,24 @@ class TextClassifier:
         # training progress bar
         train_desc = "Epoch {:2d}: {} - Loss: {:.6f}"
         train_bar = tqdm(initial=0, leave=True, total=len(batches.dataset.x),
-                         desc=train_desc.format(ep, type, 0), position=0)
+                         desc=train_desc.format(ep, str_name, 0), position=0)
 
         for i, batch in enumerate(batches):
-            x_batch, y_batch, word_pos_batch = batch
+            x_batch, y_batch, word_pos_batch, src_key_padding_mask = batch
             x_batch = x_batch.to(self.device)
             y_batch = y_batch.to(self.device)
+            src_key_padding_mask = src_key_padding_mask.to(self.device)
 
             # Reinitialize grad
             self.model.zero_grad()
             self.optimizer.zero_grad()
             # Forward pass
-            model_inp = (x_batch, word_pos_batch)
+            model_inp = (x_batch, word_pos_batch, src_key_padding_mask)
             scores = self.model(model_inp)
             # Compute the loss for this batch.
             loss = self.loss_fun(scores, y_batch)
 
-            if type.lower() == 'train':
+            if do_train:
                 # Backward pass
                 loss.backward()
                 # Optimize
@@ -168,7 +170,7 @@ class TextClassifier:
             accuracy = n_correct / n_instances
 
             # Update train bar
-            train_bar.desc = train_desc.format(ep, type, total_loss / n_instances)
+            train_bar.desc = train_desc.format(ep, str_name, total_loss / n_instances)
             train_bar.update(bs)
 
         train_bar.close()
@@ -199,7 +201,7 @@ class TextClassifier:
 
 
 # %% Predictor
-def make_predictions(clf, data_test_path):
+def make_predictions(clf, data_test_path, folder):
     # read the test data
     x_test, y_test_true, word_pos_test, _ = read_data(data_test_path)
     # make predictions
@@ -215,3 +217,8 @@ def make_predictions(clf, data_test_path):
 
     accuracy = true_pred / (true_pred + false_pred)
     tqdm.write('Accuracy of model on test set is {:.3f}%'.format(accuracy*100))
+
+    final_acc = pd.DataFrame(columns=["test_acc"])
+    # Save history
+    final_acc = final_acc.append({"test_acc": final_acc, }, ignore_index=True)
+    final_acc.to_csv(os.path.join(folder, 'history.csv'), index=False)
