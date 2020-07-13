@@ -23,32 +23,45 @@ def read_data(corpus_file):
 class Vocabulary:
     """Manages the numerical encoding of the vocabulary."""
 
-    def __init__(self, tokenizer=None, max_voc_size=None):
+    def __init__(self, max_voc_size=None, character=False):
 
         self.PAD = '___PAD___'
         self.UNKNOWN = '___UNKNOWN___'
-        self.NUMBER = '___NUMBER___'
+
+        self.character = character
+        self.max_voc_size = max_voc_size
 
         # String-to-integer mapping
         self.stoi = None
-
         # Integer-to-string mapping
         self.itos = None
-
         # Tokenizer that will be used to split document strings into words.
-        if tokenizer:
-            self.tokenizer = tokenizer
-        else:
-            self.tokenizer = lambda s: s.split()
-
-        # Maximally allowed vocabulary size.
-        self.max_voc_size = max_voc_size
+        self.tokenizer = lambda s: s.split()
 
     def build(self, docs):
         """Builds the vocabulary, based on a set of documents."""
 
         # Sort all words by frequency
-        word_freqs = Counter(w for doc in docs for w in self.tokenizer(doc))
+        if self.character:
+            # actually here its char freqs but meh.
+            """res = []
+            for doc in docs:
+                temp = []
+                for w in self.tokenizer(doc):
+                    for c in w:
+                        temp.append(c)
+            res.append(temp)"""
+            docs = [[c for w in self.tokenizer(doc) for c in w] for doc in docs]
+        else:
+            """res = []
+            for doc in docs:
+                temp = []
+                for w in self.tokenizer(doc):
+                    temp.append(w)
+                res.append(temp)"""
+            docs = [[w for w in self.tokenizer(doc)] for doc in docs]
+
+        word_freqs = Counter(w for doc in docs for w in doc)
         word_freqs = sorted(((f, w) for w, f in word_freqs.items()), reverse=True)
 
         # Build the integer-to-string mapping. The vocabulary starts with the two dummy symbols,
@@ -64,7 +77,29 @@ class Vocabulary:
     def encode(self, docs):
         """Encodes a set of documents."""
         unkn_index = self.stoi[self.UNKNOWN]
-        return [[self.stoi.get(w, unkn_index) for w in self.tokenizer(doc)] for doc in docs]
+        if self.character:
+            """
+            res = []
+            for doc in docs:
+                temp1 = []
+                for w in self.tokenizer(doc):
+                    temp2 =[]
+                    for c in w:
+                        temp2.append(self.stoi.get(c, unkn_index))
+                    temp1.append(temp2)
+                res.append(temp1)"""
+            encoded = [[[self.stoi.get(c, unkn_index) for c in w] for w in self.tokenizer(doc)] for doc in docs]
+        else:
+            """
+            res = []
+            for doc in docs:
+                temp = []
+                for w in self.tokenizer(doc):
+                    temp.append(self.stoi.get(w, unkn_index))
+                res.append(temp)
+            """
+            encoded = [[self.stoi.get(w, unkn_index) for w in self.tokenizer(doc)] for doc in docs]
+        return encoded
 
     def get_unknown_idx(self):
         """Returns the integer index of the special dummy word representing unknown words."""
@@ -80,13 +115,14 @@ class Vocabulary:
 
 # %% Document Batching
 class DocumentDataset(Dataset):
-    def __init__(self, x, y, word_pos):
+    def __init__(self, x, y, word_pos, x_char):
         self.x = x
         self.y = y
         self.word_pos = word_pos
+        self.x_char = x_char
 
     def __getitem__(self, idx):
-        return self.x[idx], self.y[idx], self.word_pos[idx]
+        return self.x[idx], self.y[idx], self.word_pos[idx], self.x_char[idx]
 
     def __len__(self):
         return len(self.x)
@@ -98,18 +134,30 @@ class DocumentBatcher:
         self.pad = voc.get_pad_idx()
 
     def __call__(self, data):
-        # How long is the longest document in this batch?
-        max_len = max(len(x) for x, _, _ in data)
+        # data is a list of tuples with words, tags, word_positions, word_chars
 
-        # Build the document tensor. We pad the shorter documents so that all documents have the same length.
-        x_padded = torch.as_tensor([x + [self.pad] * (max_len - len(x)) for x, _, _ in data])
+        # How long is the longest document in this batch?
+        max_doc_len = max(len(x) for x, _, _, _ in data)
+        # Build the document-word tensor.
+        # We pad the shorter documents so that all documents have the same length.
+        x_padded = torch.as_tensor([x + [self.pad] * (max_doc_len - len(x)) for x, _, _, _ in data])
+
         # generate padding mask (0 for non padded, 1 for padded)
-        src_key_padding_mask = torch.as_tensor([len(x)*[0] + [1] * (max_len - len(x)) for x, _, _ in data]).bool()
+        src_key_padding_mask = torch.as_tensor([len(x)*[0] + [1] * (max_doc_len - len(x)) for x, _, _, _ in data]).bool()
 
         # Build the label tensor.
-        y = torch.as_tensor([y for _, y, _ in data])
+        y = torch.as_tensor([y for _, y, _, _ in data])
 
-        # Build the position tensor.
-        word_pos = torch.as_tensor([pos for _, _, pos in data])
+        # Build the word position tensor.
+        word_pos = torch.as_tensor([pos for _, _, pos, _ in data])
 
-        return x_padded, y, word_pos, src_key_padding_mask
+        # How long is the longest word in this batch?
+        max_word_len = max(len(w) for _, _, _, x_char in data for w in x_char)
+        # build the document-char tensor.
+        # We pad the shorter documents so that all documents have the same length.
+        x_char_padded = [x_char + [[]] * (max_doc_len - len(x_char)) for _, _, _, x_char in data]
+        # We pad the shorter words so that all words have the same length.
+        x_char_padded = [[w + [self.pad] * (max_word_len - len(w)) for w in x_char] for x_char in x_char_padded]
+        x_char_padded = torch.as_tensor(x_char_padded)
+
+        return x_padded, y, word_pos, x_char_padded, src_key_padding_mask

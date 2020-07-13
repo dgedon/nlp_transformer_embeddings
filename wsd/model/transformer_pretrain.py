@@ -43,7 +43,7 @@ class PretrainedTransformerBlock(nn.Module):
                 param.requires_grad = False
 
     def forward(self, src):
-        x, word_pos, src_key_padding_mask = src
+        x, word_pos, x_char, src_key_padding_mask = src
 
         # process data (no mask in transformer used)
         src1 = self.embedding(x) * math.sqrt(self.emb_dim)
@@ -127,7 +127,7 @@ class MyTransformer(nn.Module):
         src1 = self.embedding(src) * math.sqrt(self.emb_dim)
         src2 = src1.transpose(0, 1)
         src3 = self.pos_encoder(src2)
-        src4 = self.transformer_encoder(src3, mask=self.mask, src_key_padding_mask=src_key_padding_mask)
+        src4 = self.transformer_encoder(src3, mask=self.mask)  # , src_key_padding_mask=src_key_padding_mask)
 
         out1 = self.decoder(src4)
         output = out1.permute(1, 2, 0)

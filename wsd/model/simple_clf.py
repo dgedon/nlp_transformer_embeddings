@@ -12,7 +12,7 @@ class ModelSimpleEmb(nn.Module):
         self.dropout = nn.Dropout(self.dropout)
 
     def forward(self, src):
-        x, word_pos, _ = src
+        x, word_pos, x_char, _ = src
         embedded = self.embedding(x)
         cBoW = embedded.mean(dim=1)
         out = self.dropout(cBoW)

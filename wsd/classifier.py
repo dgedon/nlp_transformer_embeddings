@@ -32,6 +32,7 @@ class TextClassifier:
 
         # define vocabulary
         self.voc = Vocabulary(max_voc_size=self.max_voc_size)
+        self.char_voc = Vocabulary(max_voc_size=self.max_voc_size, character=True)
         self.lbl_enc = LabelEncoder()
 
     def preprocess(self, data_path):
@@ -49,19 +50,24 @@ class TextClassifier:
         # build the vocabulary
         self.voc.build(x_train)
         self.lbl_enc.fit(y_train)
+        # also build a vocabulary for characters
+        self.char_voc.build(x_train)
 
         # get vocabulary sizes
         self.voc_size = len(self.voc)
+        self.char_voc_size = len(self.char_voc)
         self.n_classes = len(self.lbl_enc.classes_)
 
-        # define data batcher
+        # define data batcher (same padding for self.voc and self.char_voc)
         self.batcher = DocumentBatcher(self.voc)
 
-        # batch the data
-        train_dataset = DocumentDataset(self.voc.encode(x_train), self.lbl_enc.transform(y_train), word_pos_train)
+        # batch the training data
+        train_dataset = DocumentDataset(self.voc.encode(x_train), self.lbl_enc.transform(y_train),
+                                        word_pos_train, self.char_voc.encode(x_train))
         train_loader = DataLoader(train_dataset, self.batch_size, shuffle=self.shuffle, collate_fn=self.batcher)
-
-        valid_dataset = DocumentDataset(self.voc.encode(x_valid), self.lbl_enc.transform(y_valid), word_pos_valid)
+        # batch the validation data
+        valid_dataset = DocumentDataset(self.voc.encode(x_valid), self.lbl_enc.transform(y_valid),
+                                        word_pos_valid, self.char_voc.encode(x_valid))
         valid_loader = DataLoader(valid_dataset, self.batch_size, shuffle=self.shuffle, collate_fn=self.batcher)
 
         return train_loader, valid_loader
@@ -139,16 +145,17 @@ class TextClassifier:
                          desc=train_desc.format(ep, str_name, 0), position=0)
 
         for i, batch in enumerate(batches):
-            x_batch, y_batch, word_pos_batch, src_key_padding_mask = batch
+            x_batch, y_batch, word_pos_batch, x_char_batch, src_key_padding_mask = batch
             x_batch = x_batch.to(self.device)
             y_batch = y_batch.to(self.device)
+            x_char_batch = x_char_batch.to(self.device)
             src_key_padding_mask = src_key_padding_mask.to(self.device)
 
             # Reinitialize grad
             self.model.zero_grad()
             self.optimizer.zero_grad()
             # Forward pass
-            model_inp = (x_batch, word_pos_batch, src_key_padding_mask)
+            model_inp = (x_batch, word_pos_batch, x_char_batch, src_key_padding_mask)
             scores = self.model(model_inp)
             # Compute the loss for this batch.
             loss = self.loss_fun(scores, y_batch)

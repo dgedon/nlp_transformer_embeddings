@@ -9,6 +9,7 @@ import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
 import os
 import numpy as np
+import math
 
 from wsd.classifier import TextClassifier
 from wsd.model.transformer_pretrain import MyTransformer
