@@ -55,7 +55,7 @@ def train_model(model, loss, optimizer, scheduler, train_loader, valid_loader, f
         scheduler.step()
 
 
-def selfsupervised(ep, model, optimizer, loader, loss, device, args, train):
+def selfsupervised(ep, model, optimizer, loader, loss, device, args, train, train_words):
     if train:
         model.train()
     else:
@@ -69,11 +69,15 @@ def selfsupervised(ep, model, optimizer, loader, loss, device, args, train):
     # loop over all batches
     for i, batch in enumerate(loader):
         # Send to device
-        x_batch, y_batch, word_pos_batch, src_key_padding_mask = batch
+        x_batch, y_batch, word_pos_batch, x_char_batch, src_key_padding_mask = batch
         x_batch = x_batch.to(device=device)
+        x_char_batch = x_char_batch.to(device=device)
         src_key_padding_mask = src_key_padding_mask.to(device=device)
         # create model input and targets
-        inp, target = model.get_input_and_targets(x_batch)
+        if train_words:
+            inp, target = model.get_input_and_targets(x_batch)
+        else:
+            inp, target = model.get_input_and_targets(x_char_batch)
 
         if train:
             # Reinitialize grad
@@ -128,7 +132,11 @@ if __name__ == '__main__':
                                help='maximum value for the gradient norm (default: 1.0)')
     config_parser.add_argument("--max_voc_size", type=int, default=5000,
                                help='maximal size of the vocabulary (default: None)')
+    config_parser.add_argument("--max_char_voc_size", type=int, default=None,
+                               help='maximal size of the character vocabulary (default: None)')
     # parameters for transformer
+    config_parser.add_argument('--transformer_type', type=str, default='words',
+                               help="Type of transformer to learn. Options: words, chars.")
     config_parser.add_argument('--num_heads', type=int, default=4,
                                help="Number of attention heads. Default is 4.")
     config_parser.add_argument('--num_trans_layers', type=int, default=3,

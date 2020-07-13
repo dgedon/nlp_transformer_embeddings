@@ -119,9 +119,9 @@ class MyTransformer(nn.Module):
         self.decoder = nn.Linear(self.emb_dim, self.voc_size)
 
     def forward(self, src, src_key_padding_mask):
-        batch_size, seq_len = src.shape
+        doc_len = src.size(1)
         # generate mask
-        self.mask = generate_random_sequence_mask(seq_len, self.perc_masked_samples).to(next(self.parameters()).device)
+        self.mask = generate_random_sequence_mask(doc_len, self.perc_masked_samples).to(next(self.parameters()).device)
 
         # process data
         src1 = self.embedding(src) * math.sqrt(self.emb_dim)
