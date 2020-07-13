@@ -14,7 +14,7 @@ class WordSelModel(nn.Module):
 
         src1 = src.transpose(0, 1)
 
-        idx = word_pos.view(-1, 1).unsqueeze(2).expand(-1, 1, src1.shape[2])
+        idx = word_pos.view(-1, 1).unsqueeze(2).expand(-1, 1, src1.shape[2]).to(device=src.device)
         out = src1.gather(1, idx)
         output = out.squeeze()
 

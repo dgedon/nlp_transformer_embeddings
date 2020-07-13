@@ -46,7 +46,8 @@ def get_model(config, clf_config, pretrain_stage_config=None, pretrain_stage_ckp
         # word selector
         word_sel_mdl = WordSelModel()
         # simple classifier
-        clf = ModelSimpleClf(config, n_classes)
+        inp_dim = config['emb_dim']
+        clf = ModelSimpleClf(config, inp_dim, n_classes)
         # combine model
         model = nn.Sequential(ptr_mdl, word_sel_mdl, clf)
 
