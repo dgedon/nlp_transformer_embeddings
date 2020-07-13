@@ -232,4 +232,4 @@ def make_predictions(clf, data_test_path, folder):
     final_acc = pd.DataFrame(columns=["test_acc"])
     # Save history
     final_acc = final_acc.append({"test_acc": final_acc, }, ignore_index=True)
-    final_acc.to_csv(os.path.join(folder, 'history.csv'), index=False)
+    final_acc.to_csv(os.path.join(folder, 'history_test.csv'), index=False)
