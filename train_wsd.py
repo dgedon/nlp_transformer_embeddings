@@ -36,10 +36,12 @@ if __name__ == '__main__':
     config_parser.add_argument("--lr_factor", type=float, default=0.1,
                                help='reducing factor for the lr in a plateau (default: 0.1)')
     # Model parameters
-    config_parser.add_argument("--model_type", type=str, default='transf_word',
-                               help='model type. Options: simple_word, transformer_word')
+    config_parser.add_argument("--model_type", type=str, default='simple_word',
+                               help='model type. Options: simple_word, simple_word_char, transformer_word')
     config_parser.add_argument("--max_voc_size", type=int, default=None,
                                help='maximal size of the vocabulary (default: None)')
+    config_parser.add_argument("--max_char_voc_size", type=int, default=None,
+                               help='maximal size of the character vocabulary (default: None)')
     config_parser.add_argument("--emb_dim", type=int, default=128,
                                help='dimension of embeddings (default: 128)')
     config_parser.add_argument("--dropout", type=float, default=0.3,
@@ -58,7 +60,7 @@ if __name__ == '__main__':
                             help='data file for validation.')
     sys_parser.add_argument('--cuda', action='store_true',
                             help='use cuda for computations. (default: False)')
-    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/pretrained_word',
+    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/',
                             help='output folder. If we pass /PATH/TO/FOLDER/ ending with `/`,'
                                  'it creates a folder `output_YYYY-MM-DD_HH_MM_SS_MMMMMM` inside it'
                                  'and save the content inside it. If it does not ends with `/`, the content is saved'
@@ -87,21 +89,22 @@ if __name__ == '__main__':
     with open(os.path.join(folder, 'config.json'), 'w') as f:
         json.dump(vars(args), f, indent='\t')
     # Check if there is pretrained model in the given folder
-    if args.model_type.lower() not in ['simple_emb']:
-        try:
-            ckpt_pretrain_stage = torch.load(os.path.join(folder, 'pretrain_model.pth'),
-                                             map_location=lambda storage, loc: storage)
-            config_pretrain_stage = os.path.join(folder, 'pretrain_config.json')
-            with open(config_pretrain_stage, 'r') as f:
-                config_dict_pretrain_stage = json.load(f)
-            tqdm.write("Found pretrained model!")
-            # adapt voc size
-            args.max_voc_size = config_dict_pretrain_stage['max_voc_size']
-        except:
-            ckpt_pretrain_stage = None
-            config_dict_pretrain_stage = None
-            pretrain_ids = []
-            tqdm.write("Did not found pretrained model!")
+    try:
+        if args.model_type.lower() in ['simple_word', 'simple_word_char']:
+            raise Exception('no pretrained simple embedding model')
+        ckpt_pretrain_stage = torch.load(os.path.join(folder, 'pretrain_model.pth'),
+                                         map_location=lambda storage, loc: storage)
+        config_pretrain_stage = os.path.join(folder, 'pretrain_config.json')
+        with open(config_pretrain_stage, 'r') as f:
+            config_dict_pretrain_stage = json.load(f)
+        tqdm.write("Found pretrained model!")
+        # adapt voc size
+        args.max_voc_size = config_dict_pretrain_stage['max_voc_size']
+    except:
+        ckpt_pretrain_stage = None
+        config_dict_pretrain_stage = None
+        pretrain_ids = []
+        tqdm.write("Did not found pretrained model!")
 
     # Set seed
     torch.manual_seed(args.seed)
@@ -129,7 +132,7 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define model...")
 
-    model = get_model(vars(args), clf.voc_size, clf.n_classes, config_dict_pretrain_stage, ckpt_pretrain_stage)
+    model = get_model(vars(args), clf, config_dict_pretrain_stage, ckpt_pretrain_stage)
     model.to(device=device)
     clf.set_model(model)
 

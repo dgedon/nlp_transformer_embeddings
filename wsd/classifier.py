@@ -26,13 +26,14 @@ class TextClassifier:
         self.lr_factor = args['lr_factor']
 
         self.max_voc_size = args['max_voc_size']
+        self.max_char_voc_size = args['max_char_voc_size']
         self.shuffle = True
 
         self.device = device
 
         # define vocabulary
         self.voc = Vocabulary(max_voc_size=self.max_voc_size)
-        self.char_voc = Vocabulary(max_voc_size=self.max_voc_size, character=True)
+        self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True)
         self.lbl_enc = LabelEncoder()
 
     def preprocess(self, data_path):
@@ -190,17 +191,20 @@ class TextClassifier:
 
         # Build a DataLoader to generate the batches, as above.
         dummy_labels = [self.lbl_enc.classes_[0] for _ in x]
-        dataset = DocumentDataset(self.voc.encode(x), self.lbl_enc.transform(dummy_labels), word_pos)
+
+        dataset = DocumentDataset(self.voc.encode(x), self.lbl_enc.transform(dummy_labels),
+                                  word_pos, self.char_voc.encode(x))
         loader = DataLoader(dataset, self.batch_size, shuffle=False, collate_fn=batcher)
 
         # Apply the model to all the batches and aggregate the predictions.
         self.model_best.eval()
         output = []
-        for x_batch, y_batch, word_pos_batch in loader:
+        for x_batch, y_batch, word_pos_batch, x_char_batch, src_key_padding_mask in loader:
             x_batch = x_batch.to(self.device)
             y_batch = y_batch.to(self.device)
             word_pos_batch = word_pos_batch.to(self.device)
-            model_inp = (x_batch, word_pos_batch)
+            x_char_batch = x_char_batch.to(self.device)
+            model_inp = (x_batch, word_pos_batch, x_char_batch, src_key_padding_mask)
             scores = self.model_best(model_inp)
             guesses = scores.argmax(dim=1)
             output.extend(self.lbl_enc.inverse_transform(guesses.cpu().numpy()))

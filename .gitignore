@@ -3,3 +3,4 @@ __pycache__/
 wsd/data/a1_test/*
 wsd/output_2020*
 wsd/pretrained*
+wsd/test.py

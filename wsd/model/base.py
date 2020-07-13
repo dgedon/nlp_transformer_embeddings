@@ -2,18 +2,36 @@ import torch.nn as nn
 from wsd.model.simple_clf import *
 
 
-def get_model(config, voc_size, n_classes, pretrain_stage_config=None, pretrain_stage_ckpt=None):
-    if config['model_type'].lower() == 'simple_emb':
+def get_model(config, clf_config, pretrain_stage_config=None, pretrain_stage_ckpt=None):
+    voc_size = clf_config.voc_size
+    char_voc_size = clf_config.char_voc_size
+    n_classes = clf_config.n_classes
+
+    if config['model_type'].lower() == 'simple_word':
         """"
         simple model consisting of:
-        embedding layer + simple FF classifier
+        word embedding layer + simple FF classifier
         """
-        ptr_mdl = ModelSimpleEmb(config, voc_size)
-        clf = ModelSimpleClf(config, n_classes)
+        input_dim = config['emb_dim']
+        # define model
+        word_emb_mdl = ModelSimpleWordEmb(config, voc_size)
+        clf = ModelSimpleClf(config, input_dim, n_classes)
         # combine model
-        model = nn.Sequential(ptr_mdl, clf)
+        model = nn.Sequential(word_emb_mdl, clf)
 
-    if config['model_type'].lower() == 'transf_word':
+    elif config['model_type'].lower() == 'simple_word_char':
+        """
+        simple model consisiting of:
+        word embedding layer, char embedding layer + simple FF classifier
+        """
+        input_dim = 2*config['emb_dim']
+        # define model
+        word_char_emb_mdl = ModelSimpleWordCharEmb(config, voc_size, char_voc_size)
+        clf = ModelSimpleClf(config, input_dim, n_classes)
+        # combine model
+        model = nn.Sequential(word_char_emb_mdl, clf)
+
+    elif config['model_type'].lower() == 'transformer_word':
         from wsd.model.transformer_pretrain import MyTransformer
         from wsd.model.selection import WordSelModel
         """
