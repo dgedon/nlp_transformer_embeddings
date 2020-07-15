@@ -15,18 +15,18 @@ from wsd.classifier import TextClassifier
 from wsd.model.transformer_pretrain import MyTransformer
 
 
-def train_model(model, loss, optimizer, scheduler, train_loader, valid_loader, folder, device):
+def train_model(model, loss, optimizer, scheduler, train_loader, valid_loader, folder, device, train_words):
     history = pd.DataFrame(columns=["epoch", "train_loss", "valid_loss", "lr", ])
     best_loss = np.Inf
     for ep in range(args.epochs):
-        train_loss = selfsupervised(ep, model, optimizer, train_loader, loss, device, args, train=True)
-        valid_loss = selfsupervised(ep, model, optimizer, valid_loader, loss, device, args, train=False)
+        train_loss = selfsupervised(ep, model, optimizer, train_loader, loss, device, args, train_words, train=True)
+        valid_loss = selfsupervised(ep, model, optimizer, valid_loader, loss, device, args, train_words, train=False)
         # Get learning rate
         for param_group in optimizer.param_groups:
             learning_rate = param_group["lr"]
         # Print message
-        message = 'Epoch {:2d}: \tTrain Loss {:.6f} ' \
-                  '\tValid Loss {:.6f} \tLearning Rate {:.7f}\t' \
+        message = 'Epoch {:2d}: \tTrain Loss {:2.3e} ' \
+                  '\tValid Loss {:2.3e} \tLearning Rate {:1.2e}\t' \
             .format(ep, train_loss, valid_loss, learning_rate)
         tqdm.write(message)
 
@@ -55,7 +55,7 @@ def train_model(model, loss, optimizer, scheduler, train_loader, valid_loader, f
         scheduler.step()
 
 
-def selfsupervised(ep, model, optimizer, loader, loss, device, args, train, train_words):
+def selfsupervised(ep, model, optimizer, loader, loss, device, args, train_words, train):
     if train:
         model.train()
     else:
@@ -63,7 +63,7 @@ def selfsupervised(ep, model, optimizer, loader, loss, device, args, train, trai
     total_loss = 0
     n_entries = 0
     str_name = 'train' if train else 'val'
-    desc = "Epoch {:2d}: {} - Loss: {:.6f}"
+    desc = "Epoch {:2d}: {} - Loss: {:2.3e}"
     bar = tqdm(initial=0, leave=True, total=len(loader.dataset.x), desc=desc.format(ep, str_name, 0), position=0)
 
     # loop over all batches
@@ -75,7 +75,7 @@ def selfsupervised(ep, model, optimizer, loader, loss, device, args, train, trai
         src_key_padding_mask = src_key_padding_mask.to(device=device)
         # create model input and targets
         if train_words:
-            inp, target = model.get_input_and_targets(x_batch)
+            inp, target = model.get_input_and_targets(x_batch, src_key_padding_mask)
         else:
             inp, target = model.get_input_and_targets(x_char_batch)
 
@@ -147,8 +147,8 @@ if __name__ == '__main__':
                                help="Size of the FF network in the transformer. Default is 256.")
     config_parser.add_argument('--dropout_trans', type=float, default=0.2,
                                help='dropout rate of transformer (default: 0.2).')
-    config_parser.add_argument('--perc_masked_samp', type=int, default=0.15,
-                               help="Percentage of total masked samples. Default is 0.15.")
+    config_parser.add_argument('--perc_masked_token', type=int, default=0.15,
+                               help="Percentage of total masked token. Default is 0.15.")
     args, rem_args = config_parser.parse_known_args()
 
     # System setting
@@ -218,7 +218,8 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define model...")
 
-    model = MyTransformer(vars(args), clf.voc_size)
+    train_words = True if args.transformer_type.lower() == 'words' else False
+    model = MyTransformer(vars(args), clf, train_words)
     model.to(device=device)
 
     tqdm.write("Done!")
@@ -251,4 +252,4 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Train the model:")
 
-    train_model(model, loss, optimizer, scheduler, train_loader, valid_loader, folder, device)
+    train_model(model, loss, optimizer, scheduler, train_loader, valid_loader, folder, device, train_words)

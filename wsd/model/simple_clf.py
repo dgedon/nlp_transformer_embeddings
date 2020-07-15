@@ -38,17 +38,16 @@ class ModelSimpleWordCharEmb(nn.Module):
 
         # word embedding
         word_emb = self.word_embedding(x)
-        word_emb = self.dropout(word_emb)
         cbow = word_emb.mean(dim=1)
+        cbow = self.dropout(cbow)
 
         # character embedding
-        # (reshape to get [batch_size * doc_len, word_len, emb_dim] as output)
-        # x_char = x_char.view(-1, x_char.size(-1))
         char_emb = self.char_embedding(x_char)
-        char_emb = self.dropout(char_emb)
+        # reshape to [batch_size, doc_len*word_len, emb_dim]
+        char_emb = char_emb.view(char_emb.size(0), -1, self.emb_dim)
         # get continuous bag of characters
-        cboc = char_emb.mean(dim=2)
-        cboc = cboc.mean(dim=1)
+        cboc = char_emb.mean(dim=1)
+        cboc = self.dropout(cboc)
 
         # concatenate cbow and cboc
         out = torch.cat([cbow, cboc], 1)

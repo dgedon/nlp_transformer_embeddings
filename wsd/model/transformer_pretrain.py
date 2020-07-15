@@ -2,9 +2,10 @@ import math
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.nn import TransformerEncoder, TransformerEncoderLayer
+from torch.nn.modules.transformer import TransformerEncoder, TransformerEncoderLayer
 
 
+# %% Generate attention masks
 def generate_random_sequence_mask(sz, perc_masking):
     """
     According to attention definition the same mask is used for all sequences in the batch.
@@ -22,6 +23,13 @@ def generate_random_sequence_mask(sz, perc_masking):
     return mask
 
 
+def generate_triangular_mask(sz_rows, sz_cols):
+    mask = torch.triu(torch.ones(sz_rows, sz_cols), diagonal=1 + sz_cols-sz_rows).byte()
+    mask = mask.float().masked_fill(mask == 0, float('0.0')).masked_fill(mask == 1, float('-inf'))
+    return mask
+
+
+# %% Extract Pre-trained block
 class PretrainedTransformerBlock(nn.Module):
     """Get reusable part from MyTransformer and return new model. Include Linear block with the given output_size."""
 
@@ -55,6 +63,7 @@ class PretrainedTransformerBlock(nn.Module):
         return output
 
 
+# %% Positional Encoder
 class PositionalEncoding(nn.Module):
     # This is the positional encoding according to paper "Attention is all you need".
     # Could be changed to learnt encoding
@@ -91,25 +100,32 @@ class PositionalEncoding(nn.Module):
         Shape:
             x: [sequence length, batch size, embed dim]
             output: [sequence length, batch size, embed dim]
-        Examples:
-            >>> output = pos_encoder(x)
         """
         x = x + self.pe[:x.size(0), :]
         return self.dropout(x)
 
 
-# new pre-trained model
+# %% Transformer model
 class MyTransformer(nn.Module):
     """My Transformer:
     inspired by https://github.com/pytorch/examples/tree/master/word_language_model
     """
 
-    def __init__(self, args, voc_size):
+    def __init__(self, args, clf, train_words):
         super(MyTransformer, self).__init__()
 
-        self.perc_masked_samples = args['perc_masked_samp']
+        self.train_words = train_words
+
+        if train_words:
+            self.voc_size = clf.voc_size
+            self.voc_mask_id = clf.voc.get_mask_idx()
+        else:
+            # this is actually for characters but for compatibility we use the same variable name
+            self.voc_size = clf.char_voc_size
+            self.voc_mask_id = clf.char_voc.get_mask_idx()
+        self.perc_masked_token = args['perc_masked_token']
+
         self.emb_dim = args["emb_dim"]
-        self.voc_size = voc_size
 
         self.embedding = nn.Embedding(self.voc_size, self.emb_dim)
         self.pos_encoder = PositionalEncoding(self.emb_dim, args['dropout_trans'])
@@ -119,15 +135,15 @@ class MyTransformer(nn.Module):
         self.decoder = nn.Linear(self.emb_dim, self.voc_size)
 
     def forward(self, src, src_key_padding_mask):
-        doc_len = src.size(1)
+        # doc_len = src.size(1)
         # generate mask
-        self.mask = generate_random_sequence_mask(doc_len, self.perc_masked_samples).to(next(self.parameters()).device)
+        # mask = generate_random_sequence_mask(doc_len, self.perc_masked_samples).to(next(self.parameters()).device)
 
         # process data
         src1 = self.embedding(src) * math.sqrt(self.emb_dim)
         src2 = src1.transpose(0, 1)
         src3 = self.pos_encoder(src2)
-        src4 = self.transformer_encoder(src3, mask=self.mask)  # , src_key_padding_mask=src_key_padding_mask)
+        src4 = self.transformer_encoder(src3, src_key_padding_mask=src_key_padding_mask)  # mask=mask,
 
         out1 = self.decoder(src4)
         output = out1.permute(1, 2, 0)
@@ -138,9 +154,28 @@ class MyTransformer(nn.Module):
         freeze = not finetuning
         return PretrainedTransformerBlock(self, freeze)
 
-    def get_input_and_targets(self, x):
-        inp = x
-        target = x
+    def get_input_and_targets(self, x, src_key_padding_mask):
+        if self.train_words:
+            # inputs are masked docs
+            inp = x
+            # for each document in the batch
+            for i, batch in enumerate(x):
+                sz = (~src_key_padding_mask[i, :]).cpu().int().sum()
+                # number of masked tokens
+                # add a uniform random number U(-0.5,+0.5) for probabilistic rounding
+                temp = np.random.rand() - 0.5
+                num_mask = int(self.perc_masked_token * sz + temp)
+                # get masking indices
+                masked_idx = np.random.choice(sz, num_mask, replace=False)
+                # mask indices
+                inp[i, masked_idx] = self.voc_mask_id
+
+            # targets are the original docs
+            target = x
+        else:
+            #TODO
+            inp = x
+            target = x
 
         # return input, target
         return inp, target

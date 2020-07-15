@@ -1,7 +1,6 @@
 from torch.utils.data import DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
-from collections import defaultdict
 import torch
 import pandas as pd
 from tqdm import tqdm
@@ -231,5 +230,5 @@ def make_predictions(clf, data_test_path, folder):
 
     final_acc = pd.DataFrame(columns=["test_acc"])
     # Save history
-    final_acc = final_acc.append({"test_acc": final_acc, }, ignore_index=True)
-    final_acc.to_csv(os.path.join(folder, 'history_test.csv'), index=False)
+    final_acc = final_acc.append({"test_acc": accuracy, }, ignore_index=True)
+    final_acc.to_csv(os.path.join(folder, 'history_testing.csv'), index=False)

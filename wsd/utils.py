@@ -27,6 +27,7 @@ class Vocabulary:
 
         self.PAD = '___PAD___'
         self.UNKNOWN = '___UNKNOWN___'
+        self.MASK = '___MASK___'
 
         self.character = character
         self.max_voc_size = max_voc_size
@@ -67,9 +68,9 @@ class Vocabulary:
         # Build the integer-to-string mapping. The vocabulary starts with the two dummy symbols,
         # and then all words, sorted by frequency. Optionally, limit the vocabulary size.
         if self.max_voc_size:
-            self.itos = [self.PAD, self.UNKNOWN] + [w for _, w in word_freqs[:self.max_voc_size - 2]]
+            self.itos = [self.PAD, self.UNKNOWN, self.MASK] + [w for _, w in word_freqs[:self.max_voc_size - 2]]
         else:
-            self.itos = [self.PAD, self.UNKNOWN] + [w for _, w in word_freqs]
+            self.itos = [self.PAD, self.UNKNOWN, self.MASK] + [w for _, w in word_freqs]
 
         # Build the string-to-integer map by just inverting the aforementioned map.
         self.stoi = {w: i for i, w in enumerate(self.itos)}
@@ -108,6 +109,10 @@ class Vocabulary:
     def get_pad_idx(self):
         """Returns the integer index of the special padding dummy word."""
         return self.stoi[self.PAD]
+
+    def get_mask_idx(self):
+        """Returns the integer index of the special masking word."""
+        return self.stoi[self.MASK]
 
     def __len__(self):
         return len(self.itos)
