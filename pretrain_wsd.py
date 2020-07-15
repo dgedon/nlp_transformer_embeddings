@@ -145,7 +145,7 @@ if __name__ == '__main__':
                                help="Internal dimension of transformer. Default is 128.")
     config_parser.add_argument('--dim_inner', type=int, default=256,
                                help="Size of the FF network in the transformer. Default is 256.")
-    config_parser.add_argument('--dropout_trans', type=float, default=0.2,
+    config_parser.add_argument('--dropout_trans', type=float, default=0.4,
                                help='dropout rate of transformer (default: 0.2).')
     config_parser.add_argument('--perc_masked_token', type=int, default=0.15,
                                help="Percentage of total masked token. Default is 0.15.")

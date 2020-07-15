@@ -36,19 +36,17 @@ def get_model(config, clf_config, pretrain_stage_config=None, pretrain_stage_ckp
         from wsd.model.selection import WordSelModel
         """
         Model consisting of:
-        word embedding transformer + select features for word + simple FF classifier
+        word embedding transformer + simple FF classifier
         """
         # pretrained word model
         pretrained = MyTransformer(pretrain_stage_config, voc_size)
         if pretrain_stage_ckpt is not None:
             pretrained.load_state_dict(pretrain_stage_ckpt['model'])
         ptr_mdl = pretrained.get_pretrained()
-        # word selector
-        word_sel_mdl = WordSelModel()
         # simple classifier
         inp_dim = config['emb_dim']
         clf = ModelSimpleClf(config, inp_dim, n_classes)
         # combine model
-        model = nn.Sequential(ptr_mdl, word_sel_mdl, clf)
+        model = nn.Sequential(ptr_mdl, clf)
 
     return model

@@ -1,6 +1,5 @@
 import torch.nn as nn
 
-# new pre-trained model
 class WordSelModel(nn.Module):
     """
     Selects the correct word from the transformer word embedding output

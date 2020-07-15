@@ -59,8 +59,11 @@ class PretrainedTransformerBlock(nn.Module):
         src3 = self.pos_encoder(src2)
         out1 = self.transformer_encoder(src3, src_key_padding_mask=src_key_padding_mask)
 
-        output = (out1, word_pos)
-        return output
+        out2 = out1.transpose(0, 1)
+        # generate continuous bag of features
+        cbof = out2.mean(dim=1)
+
+        return cbof
 
 
 # %% Positional Encoder

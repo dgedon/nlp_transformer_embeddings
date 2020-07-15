@@ -68,7 +68,7 @@ class Vocabulary:
         # Build the integer-to-string mapping. The vocabulary starts with the two dummy symbols,
         # and then all words, sorted by frequency. Optionally, limit the vocabulary size.
         if self.max_voc_size:
-            self.itos = [self.PAD, self.UNKNOWN, self.MASK] + [w for _, w in word_freqs[:self.max_voc_size - 2]]
+            self.itos = [self.PAD, self.UNKNOWN, self.MASK] + [w for _, w in word_freqs[:self.max_voc_size - 3]]
         else:
             self.itos = [self.PAD, self.UNKNOWN, self.MASK] + [w for _, w in word_freqs]
 
