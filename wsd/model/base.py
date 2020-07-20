@@ -19,6 +19,18 @@ def get_model(config, clf_input, pretrain_stage_config=None, pretrain_stage_ckpt
         # combine model
         model = nn.Sequential(word_emb_mdl, clf)
 
+    elif config['model_type'].lower() == 'simple_char':
+        """"
+        simple model consisting of:
+        character embedding layer + simple FF classifier
+        """
+        input_dim = config['emb_dim']
+        # define model
+        char_emb_mdl = ModelSimpleCharEmb(config, char_voc_size)
+        clf = ModelSimpleClf(config, input_dim, n_classes)
+        # combine model
+        model = nn.Sequential(char_emb_mdl, clf)
+
     elif config['model_type'].lower() == 'simple_word_char':
         """
         simple model consisiting of:

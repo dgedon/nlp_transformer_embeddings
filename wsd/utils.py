@@ -147,8 +147,9 @@ class DocumentBatcher:
         # We pad the shorter documents so that all documents have the same length.
         x_padded = torch.as_tensor([x + [self.pad] * (max_doc_len - len(x)) for x, _, _, _ in data])
 
-        # generate padding mask (0 for non padded, 1 for padded)
-        src_key_padding_mask = torch.as_tensor([len(x)*[0] + [1] * (max_doc_len - len(x)) for x, _, _, _ in data]).bool()
+        # generate word padding mask (0 for non padded, 1 for padded)
+        src_key_padding_mask = torch.as_tensor(
+            [len(x) * [0] + [1] * (max_doc_len - len(x)) for x, _, _, _ in data]).bool()
 
         # Build the label tensor.
         y = torch.as_tensor([y for _, y, _, _ in data])
@@ -165,4 +166,16 @@ class DocumentBatcher:
         x_char_padded = [[w + [self.pad] * (max_word_len - len(w)) for w in x_char] for x_char in x_char_padded]
         x_char_padded = torch.as_tensor(x_char_padded)
 
-        return x_padded, y, word_pos, x_char_padded, src_key_padding_mask
+        # generate char padding mask (0 for non padded, 1 for padded) [how to do as list comprehension?]
+        res = []
+        for x, _, _, x_char in data:
+            temp = []
+            for char in x_char:
+                temp.append(len(char) * [0] + [1] * (max_word_len - len(char)))
+            for i in range(max_doc_len - len(x_char)):
+                temp.append([0]+ [1] * (max_word_len-1))
+            res.append(torch.as_tensor(temp))
+
+        src_char_key_padding_mask = torch.stack(res).bool()
+
+        return y, word_pos, x_padded, src_key_padding_mask, x_char_padded, src_char_key_padding_mask

@@ -6,30 +6,6 @@ import torch.nn as nn
 from torch.nn.modules.transformer import TransformerEncoder, TransformerEncoderLayer
 
 
-# %% Generate attention masks
-def generate_random_sequence_mask(sz, perc_masking):
-    """
-    According to attention definition the same mask is used for all sequences in the batch.
-    Mask is a [sz x sz] matrix. If the value [i,j] is masked by a value of -inf, then for the
-    computation of output j the input i is masked, meaning that no attention is used for this input.
-
-    sz - sequence size
-    perc_masking - percentage of all masked samples
-    """
-
-    # gives perc_masking percentage to -inf and 1-perc_masking percentage to 0
-    mask = np.random.choice([-np.inf, 0], size=(sz, sz), p=[perc_masking, 1 - perc_masking])
-    mask = torch.tensor(mask)
-
-    return mask
-
-
-def generate_triangular_mask(sz_rows, sz_cols):
-    mask = torch.triu(torch.ones(sz_rows, sz_cols), diagonal=1 + sz_cols-sz_rows).byte()
-    mask = mask.float().masked_fill(mask == 0, float('0.0')).masked_fill(mask == 1, float('-inf'))
-    return mask
-
-
 # %% Extract Pre-trained block
 class PretrainedTransformerBlock(nn.Module):
     """Get reusable part from MyTransformer and return new model. Include Linear block with the given output_size."""
@@ -52,7 +28,7 @@ class PretrainedTransformerBlock(nn.Module):
                 param.requires_grad = False
 
     def forward(self, src):
-        x, word_pos, x_char, src_key_padding_mask = src
+        word_pos, x, _, x_char, src_key_padding_mask = src
 
         # process data (no mask in transformer used)
         src1 = self.embedding(x) * math.sqrt(self.emb_dim)
@@ -139,18 +115,28 @@ class MyTransformer(nn.Module):
         self.decoder = nn.Linear(self.emb_dim, self.voc_size)
 
     def forward(self, src, src_key_padding_mask):
-        # doc_len = src.size(1)
-        # generate mask
-        # mask = generate_random_sequence_mask(doc_len, self.perc_masked_samples).to(next(self.parameters()).device)
+        if not self.train_words:
+            # do only over words -> batch_size = batch_size * document length
+            # size of src (batch_size, doc_len, word_len)
+            # size of src now (batch_size * doc_len, word_len)
+            org_batch_size = src.size(0)
+            src = src.view(-1, src.shape[-1])
+            src_key_padding_mask = src_key_padding_mask.view(-1, src_key_padding_mask.shape[-1])
 
         # process data
         src1 = self.embedding(src) * math.sqrt(self.emb_dim)
         src2 = src1.transpose(0, 1)
         src3 = self.pos_encoder(src2)
-        src4 = self.transformer_encoder(src3, src_key_padding_mask=src_key_padding_mask)  # mask=mask,
+        src4 = self.transformer_encoder(src3, src_key_padding_mask=src_key_padding_mask)
 
         out1 = self.decoder(src4)
         output = out1.permute(1, 2, 0)
+
+        if not self.train_words:
+            # size of output (batch_size * doc_len, voc_size, word_len)
+            # reshape to (batch_size, voc_size, doc_len, word_len)
+            output = output.view(org_batch_size, -1, self.voc_size, src.shape[-1])
+            output = output.permute(0, 2, 1, 3)
 
         return output
 
@@ -163,7 +149,7 @@ class MyTransformer(nn.Module):
             # inputs are masked docs
             inp = copy.deepcopy(x)
             # for each document in the batch
-            for i, batch in enumerate(x):
+            for i, _ in enumerate(x):
                 sz = (~src_key_padding_mask[i, :]).cpu().int().sum()
                 # number of masked tokens
                 # add a uniform random number U(-0.5,+0.5) for probabilistic rounding
@@ -176,10 +162,30 @@ class MyTransformer(nn.Module):
 
             # targets are the original docs
             target = copy.deepcopy(x)
+            inp_padding_mask = src_key_padding_mask
         else:
-            #TODO
-            inp = x
-            target = x
+            # TODO
+
+            # input are masked chars
+            inp = copy.deepcopy(x)
+            # for each document in the batch (i=1:batch_size)
+            for i, doc in enumerate(x):
+                # for each word in that document (j=1:max_doc_length)
+                for j, _ in enumerate(doc):
+                    sz = (~src_key_padding_mask[i, j, :]).cpu().int().sum()
+                    # number of masked tokens
+                    # add a uniform random number for probabilistic rounding
+                    temp = np.random.rand()
+                    num_mask = int(self.perc_masked_token * sz + temp)
+                    # get masking indices
+                    masked_idx = np.random.choice(sz, num_mask, replace=False)
+                    # mask indices
+                    inp[i, j, masked_idx] = self.voc_mask_id
+
+            # targets are the original chars
+            target = copy.deepcopy(x)
+            #inp = inp.view(x.size(0), -1)
+            inp_padding_mask = src_key_padding_mask # .view(x.size(0), -1)
 
         # return input, target
-        return inp, target
+        return inp, inp_padding_mask, target

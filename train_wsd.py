@@ -36,7 +36,8 @@ if __name__ == '__main__':
     config_parser.add_argument("--lr_factor", type=float, default=0.1,
                                help='reducing factor for the lr in a plateau (default: 0.1)')
     # Model parameters
-    config_parser.add_argument("--model_type", type=str, default='simple_word_char',
+    config_parser.add_argument("--model_type", choices=['simple_word', 'simple_char', 'simple_word_char',
+                                                        'transformer_word'], default='simple_char',
                                help='model type. Options: simple_word, simple_word_char, transformer_word')
     config_parser.add_argument("--max_voc_size", type=int, default=None,
                                help='maximal size of the vocabulary (default: None)')

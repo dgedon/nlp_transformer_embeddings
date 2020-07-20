@@ -13,10 +13,32 @@ class ModelSimpleWordEmb(nn.Module):
         self.dropout = nn.Dropout(self.dropout)
 
     def forward(self, src):
-        x, word_pos, x_char, _ = src
+        word_pos, x, _, x_char, _ = src
         word_emb = self.embedding(x)
         cbow = word_emb.mean(dim=1)
         out = self.dropout(cbow)
+
+        return out
+
+
+class ModelSimpleCharEmb(nn.Module):
+    def __init__(self, config, char_voc_size):
+        super().__init__()
+        self.char_voc_size = char_voc_size
+        self.emb_dim = config['emb_dim']
+        self.dropout = config['dropout']
+
+        self.embedding = nn.Embedding(self.char_voc_size, self.emb_dim)
+        self.dropout = nn.Dropout(self.dropout)
+
+    def forward(self, src):
+        word_pos, x, _, x_char, _ = src
+        char_emb = self.embedding(x_char)
+        # reshape to [batch_size, doc_len*char_len, emb_dim]
+        char_emb = char_emb.view(char_emb.size(0), -1, self.emb_dim)
+        # get continuous bag of characters
+        cboc = char_emb.mean(dim=1)
+        out = self.dropout(cboc)
 
         return out
 
@@ -34,7 +56,7 @@ class ModelSimpleWordCharEmb(nn.Module):
         self.dropout = nn.Dropout(self.dropout)
 
     def forward(self, src):
-        x, word_pos, x_char, _ = src
+        word_pos, x, _, x_char, _ = src
 
         # word embedding
         word_emb = self.word_embedding(x)

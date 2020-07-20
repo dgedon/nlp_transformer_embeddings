@@ -145,17 +145,18 @@ class TextClassifier:
                          desc=train_desc.format(ep, str_name, 0), position=0)
 
         for i, batch in enumerate(batches):
-            x_batch, y_batch, word_pos_batch, x_char_batch, src_key_padding_mask = batch
-            x_batch = x_batch.to(self.device)
+            y_batch, word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask = batch
             y_batch = y_batch.to(self.device)
-            x_char_batch = x_char_batch.to(self.device)
+            x_batch = x_batch.to(self.device)
             src_key_padding_mask = src_key_padding_mask.to(self.device)
+            x_char_batch = x_char_batch.to(self.device)
+            src_char_key_padding_mask = src_char_key_padding_mask.to(self.device)
 
             # Reinitialize grad
             self.model.zero_grad()
             self.optimizer.zero_grad()
             # Forward pass
-            model_inp = (x_batch, word_pos_batch, x_char_batch, src_key_padding_mask)
+            model_inp = (word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask)
             scores = self.model(model_inp)
             # Compute the loss for this batch.
             loss = self.loss_fun(scores, y_batch)
@@ -198,15 +199,17 @@ class TextClassifier:
         # Apply the model to all the batches and aggregate the predictions.
         self.model_best.eval()
         output = []
-        for x_batch, y_batch, word_pos_batch, x_char_batch, src_key_padding_mask in loader:
+        for y_batch, word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask in loader:
             # to device
-            x_batch = x_batch.to(self.device)
             y_batch = y_batch.to(self.device)
             word_pos_batch = word_pos_batch.to(self.device)
-            x_char_batch = x_char_batch.to(self.device)
+            x_batch = x_batch.to(self.device)
             src_key_padding_mask = src_key_padding_mask.to(self.device)
+            x_char_batch = x_char_batch.to(self.device)
+            src_char_key_padding_mask = src_char_key_padding_mask.to(self.device)
             # run
-            model_inp = (x_batch, word_pos_batch, x_char_batch, src_key_padding_mask)
+            #TODO: include src_char_key_padding_mask
+            model_inp = (word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask)
             # evaluate
             scores = self.model_best(model_inp)
             guesses = scores.argmax(dim=1)
@@ -230,7 +233,7 @@ def make_predictions(clf, data_test_path, folder):
             false_pred += 1
 
     accuracy = true_pred / (true_pred + false_pred)
-    tqdm.write('Accuracy of model on test set is {:.3f}%'.format(accuracy*100))
+    tqdm.write('Accuracy of model on test set is {:.3f}%'.format(accuracy * 100))
 
     final_acc = pd.DataFrame(columns=["test_acc"])
     # Save history
