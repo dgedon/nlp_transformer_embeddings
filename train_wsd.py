@@ -48,6 +48,10 @@ if __name__ == '__main__':
                                help='dropout rate (default: 0.3)')
     config_parser.add_argument("--hidden_size_simpleclf", type=int, default=500,
                                help='hidden dimension of simple classifier (default: 500)')
+    config_parser.add_argument('--finetuning', type=bool, default=False,
+                               help='when there is a pre-trained model, by default it '
+                                    'freezes the weights of the pre-trained model, but with this option'
+                                    'these weight will be fine-tuned during training. Default is False')
     args, rem_args = config_parser.parse_known_args()
 
     # System setting

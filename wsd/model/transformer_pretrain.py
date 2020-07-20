@@ -1,3 +1,4 @@
+import copy
 import math
 import numpy as np
 import torch
@@ -160,7 +161,7 @@ class MyTransformer(nn.Module):
     def get_input_and_targets(self, x, src_key_padding_mask):
         if self.train_words:
             # inputs are masked docs
-            inp = x
+            inp = copy.deepcopy(x)
             # for each document in the batch
             for i, batch in enumerate(x):
                 sz = (~src_key_padding_mask[i, :]).cpu().int().sum()
@@ -174,7 +175,7 @@ class MyTransformer(nn.Module):
                 inp[i, masked_idx] = self.voc_mask_id
 
             # targets are the original docs
-            target = x
+            target = copy.deepcopy(x)
         else:
             #TODO
             inp = x

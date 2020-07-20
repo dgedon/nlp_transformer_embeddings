@@ -2,10 +2,10 @@ import torch.nn as nn
 from wsd.model.simple_clf import *
 
 
-def get_model(config, clf_config, pretrain_stage_config=None, pretrain_stage_ckpt=None):
-    voc_size = clf_config.voc_size
-    char_voc_size = clf_config.char_voc_size
-    n_classes = clf_config.n_classes
+def get_model(config, clf_input, pretrain_stage_config=None, pretrain_stage_ckpt=None):
+    voc_size = clf_input.voc_size
+    char_voc_size = clf_input.char_voc_size
+    n_classes = clf_input.n_classes
 
     if config['model_type'].lower() == 'simple_word':
         """"
@@ -33,16 +33,15 @@ def get_model(config, clf_config, pretrain_stage_config=None, pretrain_stage_ckp
 
     elif config['model_type'].lower() == 'transformer_word':
         from wsd.model.transformer_pretrain import MyTransformer
-        from wsd.model.selection import WordSelModel
         """
         Model consisting of:
         word embedding transformer + simple FF classifier
         """
         # pretrained word model
-        pretrained = MyTransformer(pretrain_stage_config, voc_size)
+        pretrained = MyTransformer(pretrain_stage_config, clf_input, train_words=True)
         if pretrain_stage_ckpt is not None:
             pretrained.load_state_dict(pretrain_stage_ckpt['model'])
-        ptr_mdl = pretrained.get_pretrained()
+        ptr_mdl = pretrained.get_pretrained(config['finetuning'])
         # simple classifier
         inp_dim = config['emb_dim']
         clf = ModelSimpleClf(config, inp_dim, n_classes)

@@ -199,11 +199,15 @@ class TextClassifier:
         self.model_best.eval()
         output = []
         for x_batch, y_batch, word_pos_batch, x_char_batch, src_key_padding_mask in loader:
+            # to device
             x_batch = x_batch.to(self.device)
             y_batch = y_batch.to(self.device)
             word_pos_batch = word_pos_batch.to(self.device)
             x_char_batch = x_char_batch.to(self.device)
+            src_key_padding_mask = src_key_padding_mask.to(self.device)
+            # run
             model_inp = (x_batch, word_pos_batch, x_char_batch, src_key_padding_mask)
+            # evaluate
             scores = self.model_best(model_inp)
             guesses = scores.argmax(dim=1)
             output.extend(self.lbl_enc.inverse_transform(guesses.cpu().numpy()))
