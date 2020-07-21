@@ -28,11 +28,13 @@ class TextClassifier:
         self.max_char_voc_size = args['max_char_voc_size']
         self.shuffle = True
 
+        self.bag_of_chars = args['bag_of_chars']
+
         self.device = device
 
         # define vocabulary
         self.voc = Vocabulary(max_voc_size=self.max_voc_size)
-        self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True)
+        self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True, bag_of_chars=self.bag_of_chars)
         self.lbl_enc = LabelEncoder()
 
     def preprocess(self, data_path):
@@ -59,7 +61,7 @@ class TextClassifier:
         self.n_classes = len(self.lbl_enc.classes_)
 
         # define data batcher (same padding for self.voc and self.char_voc)
-        self.batcher = DocumentBatcher(self.voc)
+        self.batcher = DocumentBatcher(self.voc, self.bag_of_chars)
 
         # batch the training data
         train_dataset = DocumentDataset(self.voc.encode(x_train), self.lbl_enc.transform(y_train),

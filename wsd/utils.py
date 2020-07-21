@@ -23,13 +23,14 @@ def read_data(corpus_file):
 class Vocabulary:
     """Manages the numerical encoding of the vocabulary."""
 
-    def __init__(self, max_voc_size=None, character=False):
+    def __init__(self, max_voc_size=None, character=False, bag_of_chars=False):
 
         self.PAD = '___PAD___'
         self.UNKNOWN = '___UNKNOWN___'
         self.MASK = '___MASK___'
 
         self.character = character
+        self.bag_of_chars = bag_of_chars
         self.max_voc_size = max_voc_size
 
         # String-to-integer mapping
@@ -44,7 +45,7 @@ class Vocabulary:
 
         # Sort all words by frequency
         if self.character:
-            # actually here its char freqs but meh.
+            # actually here its char freqs and not word freqs but meh.
             """res = []
             for doc in docs:
                 temp = []
@@ -52,7 +53,10 @@ class Vocabulary:
                     for c in w:
                         temp.append(c)
             res.append(temp)"""
-            docs = [[c for w in self.tokenizer(doc) for c in w] for doc in docs]
+            if self.bag_of_chars:
+                docs = [[c for w in doc for c in w] for doc in docs]
+            else:
+                docs = [[c for w in self.tokenizer(doc) for c in w] for doc in docs]
         else:
             """res = []
             for doc in docs:
@@ -89,7 +93,11 @@ class Vocabulary:
                         temp2.append(self.stoi.get(c, unkn_index))
                     temp1.append(temp2)
                 res.append(temp1)"""
-            encoded = [[[self.stoi.get(c, unkn_index) for c in w] for w in self.tokenizer(doc)] for doc in docs]
+            if self.bag_of_chars:
+                # maximum size here is 1024. Cut off afterwards
+                encoded = [[self.stoi.get(w, unkn_index) for w in doc[:1024]] for doc in docs]
+            else:
+                encoded = [[[self.stoi.get(c, unkn_index) for c in w] for w in self.tokenizer(doc)] for doc in docs]
         else:
             """
             res = []
@@ -134,9 +142,10 @@ class DocumentDataset(Dataset):
 
 
 class DocumentBatcher:
-    def __init__(self, voc):
+    def __init__(self, voc, bag_of_chars):
         # Find the integer index of the dummy padding word.
         self.pad = voc.get_pad_idx()
+        self.bag_of_chars = bag_of_chars
 
     def __call__(self, data):
         # data is a list of tuples with words, tags, word_positions, word_chars
@@ -157,25 +166,38 @@ class DocumentBatcher:
         # Build the word position tensor.
         word_pos = torch.as_tensor([pos for _, _, pos, _ in data])
 
-        # How long is the longest word in this batch?
-        max_word_len = max(len(w) for _, _, _, x_char in data for w in x_char)
-        # build the document-char tensor.
-        # We pad the shorter documents so that all documents have the same length.
-        x_char_padded = [x_char + [[]] * (max_doc_len - len(x_char)) for _, _, _, x_char in data]
-        # We pad the shorter words so that all words have the same length.
-        x_char_padded = [[w + [self.pad] * (max_word_len - len(w)) for w in x_char] for x_char in x_char_padded]
-        x_char_padded = torch.as_tensor(x_char_padded)
+        # check if we need a bag of characters or if we have characters for each word
+        if self.bag_of_chars:
+            # how long (many chars) is the longest document? (max = 1024)
+            max_doc_len = max(len(x_char) for _, _, _, x_char in data)
+            # Build the document-word tensor.
+            # We pad the shorter documents so that all documents have the same length.
+            x_char_padded = torch.as_tensor(
+                [x_char + [self.pad] * (max_doc_len - len(x_char)) for _, _, _, x_char in data])
 
-        # generate char padding mask (0 for non padded, 1 for padded) [how to do as list comprehension?]
-        res = []
-        for x, _, _, x_char in data:
-            temp = []
-            for char in x_char:
-                temp.append(len(char) * [0] + [1] * (max_word_len - len(char)))
-            for i in range(max_doc_len - len(x_char)):
-                temp.append([0]+ [1] * (max_word_len-1))
-            res.append(torch.as_tensor(temp))
+            # generate char padding mask (0 for non padded, 1 for padded)
+            src_char_key_padding_mask = torch.as_tensor(
+                [len(x_char) * [0] + [1] * (max_doc_len - len(x_char)) for _, _, _, x_char in data]).bool()
+        else:
+            # How long is the longest word in this batch?
+            max_word_len = max(len(w) for _, _, _, x_char in data for w in x_char)
+            # build the document-char tensor.
+            # We pad the shorter documents so that all documents have the same length.
+            x_char_padded = [x_char + [[]] * (max_doc_len - len(x_char)) for _, _, _, x_char in data]
+            # We pad the shorter words so that all words have the same length.
+            x_char_padded = [[w + [self.pad] * (max_word_len - len(w)) for w in x_char] for x_char in x_char_padded]
+            x_char_padded = torch.as_tensor(x_char_padded)
 
-        src_char_key_padding_mask = torch.stack(res).bool()
+            # generate char padding mask (0 for non padded, 1 for padded) [how to do as list comprehension?]
+            res = []
+            for x, _, _, x_char in data:
+                temp = []
+                for char in x_char:
+                    temp.append(len(char) * [0] + [1] * (max_word_len - len(char)))
+                for i in range(max_doc_len - len(x_char)):
+                    temp.append([0] + [1] * (max_word_len - 1))
+                res.append(torch.as_tensor(temp))
+
+            src_char_key_padding_mask = torch.stack(res).bool()
 
         return y, word_pos, x_padded, src_key_padding_mask, x_char_padded, src_char_key_padding_mask

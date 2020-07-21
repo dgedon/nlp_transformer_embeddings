@@ -103,8 +103,9 @@ if __name__ == '__main__':
         with open(config_pretrain_stage, 'r') as f:
             config_dict_pretrain_stage = json.load(f)
         tqdm.write("Found pretrained model!")
-        # adapt voc size
+        # adapt voc size, bag_of_chars
         args.max_voc_size = config_dict_pretrain_stage['max_voc_size']
+        args.bag_of_chars = config_dict_pretrain_stage['bag_of_chars']
     except:
         ckpt_pretrain_stage = None
         config_dict_pretrain_stage = None

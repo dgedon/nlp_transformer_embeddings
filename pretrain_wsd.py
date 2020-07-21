@@ -69,21 +69,21 @@ def selfsupervised(ep, model, optimizer, loader, loss, device, args, train_words
     # loop over all batches
     for i, batch in enumerate(loader):
         # Send to device
-        x_batch, y_batch, word_pos_batch, x_char_batch, src_key_padding_mask = batch
+        y_batch, word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask = batch
         x_batch = x_batch.to(device=device)
-        x_char_batch = x_char_batch.to(device=device)
         src_key_padding_mask = src_key_padding_mask.to(device=device)
+        x_char_batch = x_char_batch.to(device=device)
+        src_char_key_padding_mask = src_char_key_padding_mask.to(device=device)
         # create model input and targets
         if train_words:
-            inp, target = model.get_input_and_targets(x_batch, src_key_padding_mask)
+            inp, inp_padding_mask, target = model.get_input_and_targets(x_batch, src_key_padding_mask)
         else:
-            inp, target = model.get_input_and_targets(x_char_batch)
-
+            inp, inp_padding_mask, target = model.get_input_and_targets(x_char_batch, src_char_key_padding_mask)
         if train:
             # Reinitialize grad
             model.zero_grad()
             # Forward pass
-            output = model(inp, src_key_padding_mask)
+            output = model(inp, inp_padding_mask)
             ll = loss(output, target)
             # Backward pass
             ll.backward()
@@ -92,7 +92,7 @@ def selfsupervised(ep, model, optimizer, loader, loss, device, args, train_words
             optimizer.step()
         else:
             with torch.no_grad():
-                output = model(inp, src_key_padding_mask)
+                output = model(inp, inp_padding_mask)
                 ll = loss(output, target)
         # Update
         total_loss += ll.detach().cpu().numpy()
@@ -134,8 +134,11 @@ if __name__ == '__main__':
                                help='maximal size of the vocabulary (default: None)')
     config_parser.add_argument("--max_char_voc_size", type=int, default=None,
                                help='maximal size of the character vocabulary (default: None)')
+    config_parser.add_argument("--bag_of_chars", type=bool, default=True,
+                               help='Use bag of chars for transformers instead of [words in doc, chars in word] '
+                                    '(default: True)')
     # parameters for transformer
-    config_parser.add_argument('--transformer_type', type=str, default='words',
+    config_parser.add_argument('--transformer_type', choices=['words', 'chars'], default='chars',
                                help="Type of transformer to learn. Options: words, chars.")
     config_parser.add_argument('--num_heads', type=int, default=4,
                                help="Number of attention heads. Default is 4.")
