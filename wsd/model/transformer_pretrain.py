@@ -13,6 +13,8 @@ class PretrainedTransformerBlock(nn.Module):
     def __init__(self, pretrained, freeze=True):
         super(PretrainedTransformerBlock, self).__init__()
         self.freeze = freeze
+        self.train_words = pretrained.train_words
+
         self.emb_dim = pretrained._modules['decoder'].in_features
 
         self.embedding = pretrained._modules['embedding']
@@ -28,13 +30,20 @@ class PretrainedTransformerBlock(nn.Module):
                 param.requires_grad = False
 
     def forward(self, src):
-        word_pos, x, _, x_char, src_key_padding_mask = src
+        word_pos, x, src_key_padding_mask, x_char, src_char_key_padding_mask = src
+
+        if self.train_words:
+            inp = x
+            in_key_padding_mask = src_key_padding_mask
+        else:
+            inp = x_char
+            in_key_padding_mask = src_char_key_padding_mask
 
         # process data (no mask in transformer used)
-        src1 = self.embedding(x) * math.sqrt(self.emb_dim)
+        src1 = self.embedding(inp) * math.sqrt(self.emb_dim)
         src2 = src1.transpose(0, 1)
         src3 = self.pos_encoder(src2)
-        out1 = self.transformer_encoder(src3, src_key_padding_mask=src_key_padding_mask)
+        out1 = self.transformer_encoder(src3, src_key_padding_mask=in_key_padding_mask)
 
         out2 = out1.transpose(0, 1)
         # generate continuous bag of features

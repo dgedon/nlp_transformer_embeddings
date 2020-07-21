@@ -37,8 +37,9 @@ if __name__ == '__main__':
                                help='reducing factor for the lr in a plateau (default: 0.1)')
     # Model parameters
     config_parser.add_argument("--model_type", choices=['simple_word', 'simple_char', 'simple_word_char',
-                                                        'transformer_word'], default='simple_char',
-                               help='model type. Options: simple_word, simple_word_char, transformer_word')
+                                                        'transformer_word', 'transformer_char', 'transformer_word_char'],
+                               default='transformer_word_char',
+                               help='model type.')
     config_parser.add_argument("--max_voc_size", type=int, default=None,
                                help='maximal size of the vocabulary (default: None)')
     config_parser.add_argument("--max_char_voc_size", type=int, default=None,
@@ -65,11 +66,13 @@ if __name__ == '__main__':
                             help='data file for validation.')
     sys_parser.add_argument('--cuda', action='store_true',
                             help='use cuda for computations. (default: False)')
-    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/',
+    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/server/pretrain_word_char',  # '/wsd/'
                             help='output folder. If we pass /PATH/TO/FOLDER/ ending with `/`,'
                                  'it creates a folder `output_YYYY-MM-DD_HH_MM_SS_MMMMMM` inside it'
                                  'and save the content inside it. If it does not ends with `/`, the content is saved'
                                  'in the folder provided.')
+    sys_parser.add_argument('--folder_model2', default=os.getcwd() + '/wsd/server/pretrain_word_char/pretrain_char',  # '/'
+                            help='Folder where second model is stored. Specify as `/` if no second model is used.')
     settings, unk = sys_parser.parse_known_args(rem_args)
     #  Final parser is needed for generating help documentation
     parser = argparse.ArgumentParser(parents=[sys_parser, config_parser])
@@ -95,7 +98,7 @@ if __name__ == '__main__':
         json.dump(vars(args), f, indent='\t')
     # Check if there is pretrained model in the given folder
     try:
-        if args.model_type.lower() in ['simple_word', 'simple_word_char']:
+        if args.model_type.lower() in ['simple_word', 'simple_word_char', 'simple_char']:
             raise Exception('no pretrained simple embedding model')
         ckpt_pretrain_stage = torch.load(os.path.join(folder, 'pretrain_model.pth'),
                                          map_location=lambda storage, loc: storage)
@@ -105,12 +108,23 @@ if __name__ == '__main__':
         tqdm.write("Found pretrained model!")
         # adapt voc size, bag_of_chars
         args.max_voc_size = config_dict_pretrain_stage['max_voc_size']
-        args.bag_of_chars = config_dict_pretrain_stage['bag_of_chars']
+        args.bag_of_chars = True
     except:
         ckpt_pretrain_stage = None
         config_dict_pretrain_stage = None
         pretrain_ids = []
         tqdm.write("Did not found pretrained model!")
+    # check for possible second model (char model)
+    if settings.folder_model2[-1] != '/' and args.model_type.lower() == 'transformer_word_char':
+        ckpt_pretrain2_stage = torch.load(os.path.join(settings.folder_model2, 'pretrain_model.pth'),
+                                          map_location=lambda storage, loc: storage)
+        config_pretrain2_stage = os.path.join(folder, 'pretrain_config.json')
+        with open(config_pretrain2_stage, 'r') as f:
+            config_dict_pretrain2_stage = json.load(f)
+        # combine both pretrain configs in a tuple
+        ckpt_pretrain_stage = (ckpt_pretrain_stage, ckpt_pretrain2_stage)
+        config_dict_pretrain_stage = (config_dict_pretrain_stage, config_dict_pretrain2_stage)
+
 
     # Set seed
     torch.manual_seed(args.seed)
