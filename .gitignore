@@ -6,3 +6,6 @@ wsd/pretrained*
 wsd/test.py
 
 wsd/server/
+
+doc/*
+!doc/nlp_project_danielgedon.pdf

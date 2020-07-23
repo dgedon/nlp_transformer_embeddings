@@ -29,6 +29,8 @@ class TextClassifier:
         self.shuffle = True
 
         self.bag_of_chars = args['bag_of_chars']
+        self.trans_max_doc_words = args['trans_max_doc_words']
+        self.trans_max_doc_chars = args['trans_max_doc_chars']
 
         self.device = device
 
@@ -61,7 +63,7 @@ class TextClassifier:
         self.n_classes = len(self.lbl_enc.classes_)
 
         # define data batcher (same padding for self.voc and self.char_voc)
-        self.batcher = DocumentBatcher(self.voc, self.bag_of_chars)
+        self.batcher = DocumentBatcher(self.voc, self.bag_of_chars, self.trans_max_doc_words, self.trans_max_doc_chars)
 
         # batch the training data
         train_dataset = DocumentDataset(self.voc.encode(x_train), self.lbl_enc.transform(y_train),
@@ -189,7 +191,7 @@ class TextClassifier:
 
     def predict(self, x, word_pos):
         """Run a trained document classifier on a set of documents and return the predictions."""
-        batcher = DocumentBatcher(self.voc)
+        batcher = DocumentBatcher(self.voc, self.bag_of_chars, self.trans_max_doc_words, self.trans_max_doc_chars)
 
         # Build a DataLoader to generate the batches, as above.
         dummy_labels = [self.lbl_enc.classes_[0] for _ in x]

@@ -20,19 +20,19 @@ def train_model(model, loss, optimizer, scheduler, train_loader, valid_loader, f
     best_loss = np.Inf
     for ep in range(args.epochs):
         train_loss = selfsupervised(ep, model, optimizer, train_loader, loss, device, args, train_words, train=True)
-        valid_loss = selfsupervised(ep, model, optimizer, valid_loader, loss, device, args, train_words, train=False)
+        valid_loss, pred_acc = selfsupervised(ep, model, optimizer, valid_loader, loss, device, args, train_words, train=False)
         # Get learning rate
         for param_group in optimizer.param_groups:
             learning_rate = param_group["lr"]
         # Print message
         message = 'Epoch {:2d}: \tTrain Loss {:2.3e} ' \
-                  '\tValid Loss {:2.3e} \tLearning Rate {:1.2e}\t' \
-            .format(ep, train_loss, valid_loss, learning_rate)
+                  '\tValid Loss {:2.3e} \tLearning Rate {:1.2e}\tPred Acc {:2.4f}%' \
+            .format(ep, train_loss, valid_loss, learning_rate, pred_acc*100)
         tqdm.write(message)
 
         # Save history
-        history = history.append({"epoch": ep, "train_loss": train_loss, "valid_loss": valid_loss, "lr": learning_rate},
-                                 ignore_index=True)
+        history = history.append({"epoch": ep, "train_loss": train_loss, "valid_loss": valid_loss, "lr": learning_rate,
+                                  "pred_acc": pred_acc}, ignore_index=True)
         history.to_csv(os.path.join(folder, 'pretrain_history.csv'), index=False)
 
         # Save best model
@@ -60,6 +60,11 @@ def selfsupervised(ep, model, optimizer, loader, loss, device, args, train_words
         model.train()
     else:
         model.eval()
+    # for accuracy
+    logsm = nn.LogSoftmax(dim=1)
+    pred_values = 0
+    n_values = 0
+    # for loss
     total_loss = 0
     n_entries = 0
     str_name = 'train' if train else 'val'
@@ -88,12 +93,16 @@ def selfsupervised(ep, model, optimizer, loader, loss, device, args, train_words
             # Backward pass
             ll.backward()
             clip_grad_norm_(model.parameters(), args.clip_value)
-            # Optimize
+            # Optimizer
             optimizer.step()
         else:
             with torch.no_grad():
                 output = model(inp, inp_padding_mask)
                 ll = loss(output, target)
+                # get correct prediction rate
+                out = logsm(output).argmax(dim=1)
+                pred_values += (out == target).cpu().sum().numpy()
+                n_values += target.cpu().numel()
         # Update
         total_loss += ll.detach().cpu().numpy()
         bs = x_batch.size(0)
@@ -102,7 +111,10 @@ def selfsupervised(ep, model, optimizer, loader, loss, device, args, train_words
         bar.desc = desc.format(ep, str_name, total_loss / n_entries)
         bar.update(bs)
     bar.close()
-    return total_loss / n_entries
+    if train:
+        return total_loss / n_entries
+    else:
+        return total_loss / n_entries, pred_values/n_values
 
 
 if __name__ == '__main__':
@@ -138,20 +150,26 @@ if __name__ == '__main__':
                                help='Use bag of chars for transformers instead of [words in doc, chars in word] '
                                     '(default: True)')
     # parameters for transformer
-    config_parser.add_argument('--transformer_type', choices=['words', 'chars'], default='chars',
+    config_parser.add_argument('--transformer_type', choices=['words', 'chars'], default='words',
                                help="Type of transformer to learn. Options: words, chars.")
-    config_parser.add_argument('--num_heads', type=int, default=4,
+    config_parser.add_argument('--num_heads', type=int, default=8,
                                help="Number of attention heads. Default is 4.")
-    config_parser.add_argument('--num_trans_layers', type=int, default=3,
-                               help="Number of transformer blocks. Default is 4.")
+    config_parser.add_argument('--num_trans_layers', type=int, default=6,
+                               help="Number of transformer blocks. Default is 3.")
     config_parser.add_argument('--emb_dim', type=int, default=128,
                                help="Internal dimension of transformer. Default is 128.")
     config_parser.add_argument('--dim_inner', type=int, default=256,
                                help="Size of the FF network in the transformer. Default is 256.")
     config_parser.add_argument('--dropout_trans', type=float, default=0.4,
                                help='dropout rate of transformer (default: 0.2).')
-    config_parser.add_argument('--perc_masked_token', type=int, default=0.15,
+    config_parser.add_argument('--perc_masked_token', type=float, default=0.15,
                                help="Percentage of total masked token. Default is 0.15.")
+    config_parser.add_argument('--trans_max_doc_words', type=int, default=192,
+                               help="Trasformer: Max number of words in document for constant sequence length. "
+                                    "Default is 192.")
+    config_parser.add_argument('--trans_max_doc_chars', type=int, default=896,
+                               help="Transformer: Max number of chars in document (bag of chars) for constant sequence "
+                                    "length. Default is 896.")
     args, rem_args = config_parser.parse_known_args()
 
     # System setting

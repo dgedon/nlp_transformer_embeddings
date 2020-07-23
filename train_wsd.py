@@ -109,6 +109,8 @@ if __name__ == '__main__':
         # adapt voc size, bag_of_chars
         args.max_voc_size = config_dict_pretrain_stage['max_voc_size']
         args.bag_of_chars = True
+        args.trans_max_doc_words = config_dict_pretrain_stage['trans_max_doc_words']
+        args.trans_max_doc_chars = config_dict_pretrain_stage['trans_max_doc_chars']
     except:
         ckpt_pretrain_stage = None
         config_dict_pretrain_stage = None
