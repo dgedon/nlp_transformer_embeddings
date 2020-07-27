@@ -2,119 +2,16 @@ import json
 import torch
 import argparse
 import datetime
-import pandas as pd
 from warnings import warn
 from tqdm import tqdm
 import torch.nn as nn
-from torch.nn.utils import clip_grad_norm_
 import os
 import numpy as np
-import math
 
-from wsd.classifier import TextClassifier
+
+from wsd.classifier_pretrain import TextClassifierPretrain
 from wsd.model.transformer_pretrain import MyTransformer
 
-
-def train_model(model, loss, optimizer, scheduler, train_loader, valid_loader, folder, device, train_words):
-    history = pd.DataFrame(columns=["epoch", "train_loss", "valid_loss", "lr", ])
-    best_loss = np.Inf
-    for ep in range(args.epochs):
-        train_loss = selfsupervised(ep, model, optimizer, train_loader, loss, device, args, train_words, train=True)
-        valid_loss, pred_acc = selfsupervised(ep, model, optimizer, valid_loader, loss, device, args, train_words, train=False)
-        # Get learning rate
-        for param_group in optimizer.param_groups:
-            learning_rate = param_group["lr"]
-        # Print message
-        message = 'Epoch {:2d}: \tTrain Loss {:2.3e} ' \
-                  '\tValid Loss {:2.3e} \tLearning Rate {:1.2e}\tPred Acc {:2.4f}%' \
-            .format(ep, train_loss, valid_loss, learning_rate, pred_acc*100)
-        tqdm.write(message)
-
-        # Save history
-        history = history.append({"epoch": ep, "train_loss": train_loss, "valid_loss": valid_loss, "lr": learning_rate,
-                                  "pred_acc": pred_acc}, ignore_index=True)
-        history.to_csv(os.path.join(folder, 'pretrain_history.csv'), index=False)
-
-        # Save best model
-        if best_loss > valid_loss:
-            # Save model
-            torch.save({'epoch': ep,
-                        'model': model.state_dict(),
-                        'optimizer': optimizer.state_dict()},
-                       os.path.join(folder, 'pretrain_model.pth'))
-            # Update best validation loss
-            best_loss = valid_loss
-            tqdm.write("Save model (best)!")
-        # Save last model
-        if ep == args.epochs - 1:
-            torch.save({'model': model.state_dict(),
-                        'optimizer': optimizer.state_dict()},
-                       os.path.join(folder, 'pretrain_final_model.pth'))
-            tqdm.write("Save model (last)!")
-        # Call optimizer step
-        scheduler.step()
-
-
-def selfsupervised(ep, model, optimizer, loader, loss, device, args, train_words, train):
-    if train:
-        model.train()
-    else:
-        model.eval()
-    # for accuracy
-    logsm = nn.LogSoftmax(dim=1)
-    pred_values = 0
-    n_values = 0
-    # for loss
-    total_loss = 0
-    n_entries = 0
-    str_name = 'train' if train else 'val'
-    desc = "Epoch {:2d}: {} - Loss: {:2.3e}"
-    bar = tqdm(initial=0, leave=True, total=len(loader.dataset.x), desc=desc.format(ep, str_name, 0), position=0)
-
-    # loop over all batches
-    for i, batch in enumerate(loader):
-        # Send to device
-        y_batch, word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask = batch
-        x_batch = x_batch.to(device=device)
-        src_key_padding_mask = src_key_padding_mask.to(device=device)
-        x_char_batch = x_char_batch.to(device=device)
-        src_char_key_padding_mask = src_char_key_padding_mask.to(device=device)
-        # create model input and targets
-        if train_words:
-            inp, inp_padding_mask, target = model.get_input_and_targets(x_batch, src_key_padding_mask)
-        else:
-            inp, inp_padding_mask, target = model.get_input_and_targets(x_char_batch, src_char_key_padding_mask)
-        if train:
-            # Reinitialize grad
-            model.zero_grad()
-            # Forward pass
-            output = model(inp, inp_padding_mask)
-            ll = loss(output, target)
-            # Backward pass
-            ll.backward()
-            clip_grad_norm_(model.parameters(), args.clip_value)
-            # Optimizer
-            optimizer.step()
-        else:
-            with torch.no_grad():
-                output = model(inp, inp_padding_mask)
-                ll = loss(output, target)
-                # get correct prediction rate
-                out = logsm(output).argmax(dim=1)
-                pred_values += (out == target).cpu().sum().numpy()
-                n_values += target.cpu().numel()
-        # Update
-        total_loss += ll.detach().cpu().numpy()
-        bs = x_batch.size(0)
-        n_entries += bs
-        # Update train bar
-        bar.desc = desc.format(ep, str_name, total_loss / n_entries)
-        bar.update(bs)
-    bar.close()
-    if train:
-        return total_loss / n_entries
-    else:
-        return total_loss / n_entries, pred_values/n_values
 
 
 if __name__ == '__main__':
@@ -142,34 +39,39 @@ if __name__ == '__main__':
                                help='reducing factor for the lr in a plateau (default: 0.1)')
     config_parser.add_argument('--clip_value', type=float, default=1.0,
                                help='maximum value for the gradient norm (default: 1.0)')
-    config_parser.add_argument("--max_voc_size", type=int, default=5000,
+    config_parser.add_argument("--max_voc_size", type=int, default=None,
                                help='maximal size of the vocabulary (default: None)')
     config_parser.add_argument("--max_char_voc_size", type=int, default=None,
                                help='maximal size of the character vocabulary (default: None)')
     config_parser.add_argument("--bag_of_chars", type=bool, default=True,
                                help='Use bag of chars for transformers instead of [words in doc, chars in word] '
                                     '(default: True)')
+    config_parser.add_argument("--max_token", type=int, default=100000,
+                               help='maximal number of used tokens for pretraining (default: tbd). '
+                                    'Max 103 mio for words.')
+    config_parser.add_argument("--max_valid_token", type=int, default=100000,
+                               help='maximal number of used tokens for validation in pretraining (default: tbd). '
+                                    'Max 217 k for words.')
     # parameters for transformer
     config_parser.add_argument('--transformer_type', choices=['words', 'chars'], default='words',
                                help="Type of transformer to learn. Options: words, chars.")
-    config_parser.add_argument('--num_heads', type=int, default=8,
+    config_parser.add_argument("--tokenizer", choices=['distilbert-base-uncased', 'simple'],
+                               default='distilbert-base-uncased',  # 'simple', #
+                               help='use of tokenizer (default: None)')
+    config_parser.add_argument('--seq_length', type=int, default=256,
+                               help="Transformer training fixed sequence length. Default is 256.")
+    config_parser.add_argument('--num_heads', type=int, default=4,  # 8
                                help="Number of attention heads. Default is 4.")
-    config_parser.add_argument('--num_trans_layers', type=int, default=6,
+    config_parser.add_argument('--num_trans_layers', type=int, default=6,  # 12
                                help="Number of transformer blocks. Default is 3.")
-    config_parser.add_argument('--emb_dim', type=int, default=128,
+    config_parser.add_argument('--emb_dim', type=int, default=128,  # 512
                                help="Internal dimension of transformer. Default is 128.")
-    config_parser.add_argument('--dim_inner', type=int, default=256,
+    config_parser.add_argument('--dim_inner', type=int, default=256,  # 768
                                help="Size of the FF network in the transformer. Default is 256.")
-    config_parser.add_argument('--dropout_trans', type=float, default=0.4,
+    config_parser.add_argument('--dropout_trans', type=float, default=0.2,
                                help='dropout rate of transformer (default: 0.2).')
     config_parser.add_argument('--perc_masked_token', type=float, default=0.15,
                                help="Percentage of total masked token. Default is 0.15.")
-    config_parser.add_argument('--trans_max_doc_words', type=int, default=192,
-                               help="Trasformer: Max number of words in document for constant sequence length. "
-                                    "Default is 192.")
-    config_parser.add_argument('--trans_max_doc_chars', type=int, default=896,
-                               help="Transformer: Max number of chars in document (bag of chars) for constant sequence "
-                                    "length. Default is 896.")
     args, rem_args = config_parser.parse_known_args()
 
     # System setting
@@ -223,7 +125,7 @@ if __name__ == '__main__':
     tqdm.write("Define classifier...")
 
     # only need this for the preprocessing and to split the data
-    clf = TextClassifier(vars(args), device)
+    clf = TextClassifierPretrain(vars(args), device)
 
     tqdm.write("Done!")
     ###################################
@@ -231,7 +133,9 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Load data and pre-process...")
 
-    train_loader, valid_loader = clf.preprocess(data_path=os.path.join(settings.data_folder, settings.data_file_train))
+    path_finetuning = os.path.join(settings.data_folder, settings.data_file_train)
+    path_pretrain = os.path.join(settings.data_folder, 'pretrain')
+    train_loader, valid_loader = clf.preprocess(path_finetuning, path_pretrain, folder)
 
     tqdm.write("Done!")
     ###################################
@@ -239,9 +143,9 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define model...")
 
-    train_words = True if args.transformer_type.lower() == 'words' else False
-    model = MyTransformer(vars(args), clf, train_words)
+    model = MyTransformer(vars(args), clf)
     model.to(device=device)
+    clf.set_model(model)
 
     tqdm.write("Done!")
     ###################################
@@ -250,6 +154,7 @@ if __name__ == '__main__':
     tqdm.write("Define optimizer...")
 
     optimizer = torch.optim.Adam(model.parameters(), args.lr)
+    clf.optimizer = optimizer
 
     tqdm.write("Done!")
     ###################################
@@ -258,6 +163,7 @@ if __name__ == '__main__':
     tqdm.write("Define scheduler...")
 
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.lr_factor)
+    clf.scheduler = scheduler
 
     tqdm.write("Done!")
     ###################################
@@ -265,7 +171,8 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define loss...")
 
-    loss = nn.CrossEntropyLoss()  # nn.MSELoss(reduction='sum')
+    loss = nn.CrossEntropyLoss(reduction='sum')
+    clf.loss_fun = loss
 
     tqdm.write("Done!")
     ###################################
@@ -273,4 +180,4 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Train the model:")
 
-    train_model(model, loss, optimizer, scheduler, train_loader, valid_loader, folder, device, train_words)
+    clf.train_model(train_loader, valid_loader, folder)

@@ -8,14 +8,18 @@ import os
 import numpy as np
 
 # user defined function
-from wsd.utils import read_data, Vocabulary, DocumentBatcher, DocumentDataset
+from wsd.utils_train import read_data_dataset_finetuning, DocumentBatcher, DocumentDataset
+from wsd.vocabulary import Vocabulary
 
 
 # %% Text classifier
 class TextClassifier:
     """A text classifier based on a neural network."""
 
-    def __init__(self, args, device):
+    def __init__(self, args, settings, device):
+        self.model_type = args['model_type']
+        self.tokenizer_choice = args['tokenizer']
+
         self.seed = args['seed']
         self.epochs = args['epochs']
         self.valid_split = args['valid_split']
@@ -29,21 +33,35 @@ class TextClassifier:
         self.shuffle = True
 
         self.bag_of_chars = args['bag_of_chars']
-        self.trans_max_doc_words = args['trans_max_doc_words']
-        self.trans_max_doc_chars = args['trans_max_doc_chars']
+        # self.trans_max_doc_words = args['trans_max_doc_words']
+        # self.trans_max_doc_chars = args['trans_max_doc_chars']
 
         self.device = device
 
         # define vocabulary
-        self.voc = Vocabulary(max_voc_size=self.max_voc_size)
-        self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True, bag_of_chars=self.bag_of_chars)
+        if self.model_type in ['simple_word', 'simple_word_char', 'simple_char']:
+            self.voc = Vocabulary(max_voc_size=self.max_voc_size, tokenizer_choice=self.tokenizer_choice)
+            self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True,
+                                       bag_of_chars=self.bag_of_chars,
+                                       tokenizer_choice=self.tokenizer_choice)
+        if self.model_type in ['transformer_word']:
+            temp = torch.load(os.path.join(settings["folder"], 'voc.pth'))
+            self.max_voc_size = temp['max_voc_size']
+            self.stoi = temp['stoi']
+            self.itos = temp['itos']
+            self.voc = Vocabulary(max_voc_size=self.max_voc_size, tokenizer_choice=self.tokenizer_choice,
+                                  stoi=self.stoi, itos=self.itos)
+            self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True,
+                                       bag_of_chars=self.bag_of_chars,
+                                       tokenizer_choice=self.tokenizer_choice)
+
         self.lbl_enc = LabelEncoder()
 
     def preprocess(self, data_path):
         """Carry out the document preprocessing, then build `DataLoader`s for the training and validation sets."""
 
         # read the training data
-        x, y, word_pos, _ = read_data(data_path)
+        x, y, word_pos, _ = read_data_dataset_finetuning(data_path)
 
         # split training data
         x_train, x_valid, y_train, y_valid, word_pos_train, word_pos_valid = train_test_split(x, y, word_pos,
@@ -53,17 +71,18 @@ class TextClassifier:
 
         # build the vocabulary
         self.voc.build(x_train)
-        self.lbl_enc.fit(y_train)
+        self.voc_size = len(self.voc)
+        tqdm.write("...word vocabulary built (size {:})...".format(self.voc_size))
         # also build a vocabulary for characters
         self.char_voc.build(x_train)
-
-        # get vocabulary sizes
-        self.voc_size = len(self.voc)
         self.char_voc_size = len(self.char_voc)
+        tqdm.write("...char vocabulary built (size {:})...".format(self.char_voc_size))
+
+        self.lbl_enc.fit(y_train)
         self.n_classes = len(self.lbl_enc.classes_)
 
         # define data batcher (same padding for self.voc and self.char_voc)
-        self.batcher = DocumentBatcher(self.voc, self.bag_of_chars, self.trans_max_doc_words, self.trans_max_doc_chars)
+        self.batcher = DocumentBatcher(self.voc, self.bag_of_chars)
 
         # batch the training data
         train_dataset = DocumentDataset(self.voc.encode(x_train), self.lbl_enc.transform(y_train),
@@ -179,7 +198,7 @@ class TextClassifier:
             # Compute the number of correct predictions, for the accuracy.
             guesses = scores.argmax(dim=1)
             n_correct += (guesses == y_batch).sum().item()
-            accuracy = n_correct / n_instances
+            acc = n_correct / n_instances
 
             # Update train bar
             train_bar.desc = train_desc.format(ep, str_name, total_loss / n_instances)
@@ -187,11 +206,11 @@ class TextClassifier:
 
         train_bar.close()
 
-        return total_loss / n_instances, accuracy
+        return total_loss / n_instances, acc
 
     def predict(self, x, word_pos):
         """Run a trained document classifier on a set of documents and return the predictions."""
-        batcher = DocumentBatcher(self.voc, self.bag_of_chars, self.trans_max_doc_words, self.trans_max_doc_chars)
+        batcher = DocumentBatcher(self.voc, self.bag_of_chars)  # , self.trans_max_doc_words, self.trans_max_doc_chars)
 
         # Build a DataLoader to generate the batches, as above.
         dummy_labels = [self.lbl_enc.classes_[0] for _ in x]
@@ -212,7 +231,7 @@ class TextClassifier:
             x_char_batch = x_char_batch.to(self.device)
             src_char_key_padding_mask = src_char_key_padding_mask.to(self.device)
             # run
-            #TODO: include src_char_key_padding_mask
+            # TODO: include src_char_key_padding_mask
             model_inp = (word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask)
             # evaluate
             scores = self.model_best(model_inp)
@@ -224,7 +243,7 @@ class TextClassifier:
 # %% Predictor
 def make_predictions(clf, data_test_path, folder):
     # read the test data
-    x_test, y_test_true, word_pos_test, _ = read_data(data_test_path)
+    x_test, y_test_true, word_pos_test, _ = read_data_dataset_finetuning(data_test_path)
     # make predictions
     y_test_pred = clf.predict(x_test, word_pos_test)
 

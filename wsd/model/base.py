@@ -74,10 +74,11 @@ def get_model(config, clf_input, pretrain_stage_config=None, pretrain_stage_ckpt
         word embedding transformer + simple FF classifier
         """
         # pretrained word model
-        pretrained = MyTransformer(pretrain_stage_config, clf_input, train_words=True)
+        pretrained = MyTransformer(pretrain_stage_config, clf_input)
         if pretrain_stage_ckpt is not None:
             pretrained.load_state_dict(pretrain_stage_ckpt['model'])
-        ptr_mdl = pretrained.get_pretrained(config['finetuning'])
+        print('finetuning: ', config['finetuning'])
+        ptr_mdl = pretrained.get_pretrained(config['finetuning'], train_words=True)
         # simple classifier
         inp_dim = config['emb_dim']
         clf = ModelSimpleClf(config, inp_dim, n_classes)

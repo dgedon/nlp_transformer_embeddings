@@ -1,3 +1,4 @@
+from tqdm import tqdm
 import copy
 import math
 import numpy as np
@@ -10,10 +11,10 @@ from torch.nn.modules.transformer import TransformerEncoder, TransformerEncoderL
 class PretrainedTransformerBlock(nn.Module):
     """Get reusable part from MyTransformer and return new model. Include Linear block with the given output_size."""
 
-    def __init__(self, pretrained, freeze=True):
+    def __init__(self, pretrained, freeze=True, train_words=False):
         super(PretrainedTransformerBlock, self).__init__()
         self.freeze = freeze
-        self.train_words = pretrained.train_words
+        self.train_words = train_words
 
         self.emb_dim = pretrained.decoder.in_features
 
@@ -22,12 +23,15 @@ class PretrainedTransformerBlock(nn.Module):
         self.transformer_encoder = pretrained.transformer_encoder
 
         if self.freeze:
-            for param in self.embedding.parameters():
+            tqdm.write("...transformer requires_grad set to False...")
+            for param in self._modules['embedding'].parameters():
                 param.requires_grad = False
-            for param in self.pos_encoder.parameters():
+            for param in self._modules['pos_encoder'].parameters():
                 param.requires_grad = False
-            for param in self.transformer_encoder.parameters():
+            for param in self._modules['transformer_encoder'].parameters():
                 param.requires_grad = False
+        else:
+            tqdm.write("...transformer requires_grad set to True...")
 
     def forward(self, src):
         word_pos, x, src_key_padding_mask, x_char, src_char_key_padding_mask = src
@@ -100,20 +104,13 @@ class MyTransformer(nn.Module):
     inspired by https://github.com/pytorch/examples/tree/master/word_language_model
     """
 
-    def __init__(self, args, clf, train_words):
+    def __init__(self, args, clf):
         super(MyTransformer, self).__init__()
 
-        self.train_words = train_words
+        self.voc_size = len(clf.voc)
+        self.voc_mask_id = clf.voc.get_mask_idx()
+        self.seq_length = args['seq_length']
 
-        if train_words:
-            self.voc_size = clf.voc_size
-            self.voc_mask_id = clf.voc.get_mask_idx()
-            self.seq_length = clf.trans_max_doc_words
-        else:
-            # this is actually for characters but for compatibility we use the same variable name
-            self.voc_size = clf.char_voc_size
-            self.voc_mask_id = clf.char_voc.get_mask_idx()
-            self.seq_length = clf.trans_max_doc_chars
         self.perc_masked_token = args['perc_masked_token']
         # number of masked tokens
         self.num_masked_token = int(self.perc_masked_token * self.seq_length)
@@ -128,24 +125,36 @@ class MyTransformer(nn.Module):
         self.decoder = nn.Linear(self.emb_dim, self.voc_size)
         self.decoder_out = nn.Linear(self.seq_length, self.num_masked_token)
 
-    def forward(self, src, src_key_padding_mask):
+    def forward(self, src, indices):
         # process data
         src1 = self.embedding(src) * math.sqrt(self.emb_dim)
         src2 = src1.transpose(0, 1)
         src3 = self.pos_encoder(src2)
-        src4 = self.transformer_encoder(src3, src_key_padding_mask=src_key_padding_mask)
+        src4 = self.transformer_encoder(src3)
 
-        out1 = self.decoder(src4)
+        # src4 is of shape (seq_length, batch_size, embedding_dim)
+        src5 = src4.permute(2, 1, 0)
+        # collect only the masked sequence values
+        out1 = src5.gather(2, indices.repeat(self.emb_dim, 1, 1))
+        # out1 is of shape (embedding_dim, batch_size, num_masked_tokens)
+        out2 = out1.permute(2, 1, 0)
+        out3 = self.decoder(out2)
+        # out3 is of shape (num_masked_tokens, batch_size, voc_size)
+        output = out3.permute(1, 2, 0)
+
+        """out1 = self.decoder(src4)
         out2 = out1.permute(1, 2, 0)
-        output = self.decoder_out(out2)
+        output = self.decoder_out(out2)"""
 
         return output
 
-    def get_pretrained(self, finetuning=False):
+    def get_pretrained(self, finetuning=False, train_words=False):
+        print('get_pretrained, finetuning:', finetuning)
         freeze = not finetuning
-        return PretrainedTransformerBlock(self, freeze)
+        print('freeze: ', freeze)
+        return PretrainedTransformerBlock(self, freeze, train_words)
 
-    def get_input_and_targets(self, x, src_key_padding_mask):
+    def get_input_and_targets(self, x):
         """
         inputs are masked docs
         targets are the values of the mask
@@ -153,17 +162,29 @@ class MyTransformer(nn.Module):
         batch_size = x.size(0)
         inp = copy.deepcopy(x)
         target = torch.empty(batch_size, self.num_masked_token, dtype=inp.dtype).to(device=inp.device)
+        indices = []
         # for each document in the batch
         for i, _ in enumerate(x):
             # get masking indices
             masked_idx = np.random.choice(self.seq_length, self.num_masked_token, replace=False)
+            masked_idx.sort()
             # get tokens of masked indices as targets
             target[i, :] = copy.copy(inp[i, masked_idx])
             # mask indices
-            inp[i, masked_idx] = self.voc_mask_id
+            length = len(masked_idx)
 
-        # padding mask
-        inp_padding_mask = src_key_padding_mask
+            mask = np.random.choice(length, int(0.8 * length), replace=False)
+            # 80% masking
+            inp[i, masked_idx[mask]] = self.voc_mask_id
+            # 10% leaving, 10% random id
+            random_mask = list(range(length))
+            for elem in mask:
+                random_mask.remove(elem)
+            num_random = int((len(random_mask) + np.random.rand())//2)
+            random_val = torch.tensor(np.random.randint(3, self.voc_size, num_random)).to(device=inp.device)
+            inp[i, masked_idx[random_mask[:num_random]]] = random_val
+            # append all indices
+            indices.append(torch.tensor(masked_idx))
 
         # return input, target
-        return inp, inp_padding_mask, target
+        return inp, target, torch.stack(indices).to(device=inp.device)

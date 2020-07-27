@@ -38,8 +38,11 @@ if __name__ == '__main__':
     # Model parameters
     config_parser.add_argument("--model_type", choices=['simple_word', 'simple_char', 'simple_word_char',
                                                         'transformer_word', 'transformer_char', 'transformer_word_char'],
-                               default='transformer_word_char',
+                               default='transformer_word',
                                help='model type.')
+    config_parser.add_argument("--tokenizer", choices=['distilbert-base-uncased', 'simple'],
+                               default='distilbert-base-uncased',  #'simple',
+                               help='use of tokenizer (default: None)')
     config_parser.add_argument("--max_voc_size", type=int, default=None,
                                help='maximal size of the vocabulary (default: None)')
     config_parser.add_argument("--max_char_voc_size", type=int, default=None,
@@ -50,7 +53,7 @@ if __name__ == '__main__':
                                help='dropout rate (default: 0.3)')
     config_parser.add_argument("--hidden_size_simpleclf", type=int, default=500,
                                help='hidden dimension of simple classifier (default: 500)')
-    config_parser.add_argument('--finetuning', type=bool, default=False,
+    config_parser.add_argument('--finetuning', action='store_true',
                                help='when there is a pre-trained model, by default it '
                                     'freezes the weights of the pre-trained model, but with this option'
                                     'these weight will be fine-tuned during training. Default is False')
@@ -66,7 +69,7 @@ if __name__ == '__main__':
                             help='data file for validation.')
     sys_parser.add_argument('--cuda', action='store_true',
                             help='use cuda for computations. (default: False)')
-    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/server/pretrain_word_char',  # '/wsd/'
+    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/server/pretrain_word',  # '/wsd/'
                             help='output folder. If we pass /PATH/TO/FOLDER/ ending with `/`,'
                                  'it creates a folder `output_YYYY-MM-DD_HH_MM_SS_MMMMMM` inside it'
                                  'and save the content inside it. If it does not ends with `/`, the content is saved'
@@ -106,16 +109,16 @@ if __name__ == '__main__':
         with open(config_pretrain_stage, 'r') as f:
             config_dict_pretrain_stage = json.load(f)
         tqdm.write("Found pretrained model!")
-        # adapt voc size, bag_of_chars
+        # adapt some parameters
         args.max_voc_size = config_dict_pretrain_stage['max_voc_size']
         args.bag_of_chars = True
-        args.trans_max_doc_words = config_dict_pretrain_stage['trans_max_doc_words']
-        args.trans_max_doc_chars = config_dict_pretrain_stage['trans_max_doc_chars']
+        args.tokenizer = config_dict_pretrain_stage['tokenizer']
     except:
         ckpt_pretrain_stage = None
         config_dict_pretrain_stage = None
         pretrain_ids = []
         tqdm.write("Did not found pretrained model!")
+        args.bag_of_chars = False
     # check for possible second model (char model)
     if settings.folder_model2[-1] != '/' and args.model_type.lower() == 'transformer_word_char':
         ckpt_pretrain2_stage = torch.load(os.path.join(settings.folder_model2, 'pretrain_model.pth'),
@@ -127,7 +130,6 @@ if __name__ == '__main__':
         ckpt_pretrain_stage = (ckpt_pretrain_stage, ckpt_pretrain2_stage)
         config_dict_pretrain_stage = (config_dict_pretrain_stage, config_dict_pretrain2_stage)
 
-
     # Set seed
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -138,7 +140,7 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define classifier...")
 
-    clf = TextClassifier(vars(args), device)
+    clf = TextClassifier(vars(args), vars(settings), device)
 
     tqdm.write("Done!")
     ###################################
@@ -154,6 +156,7 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define model...")
 
+    print('args.finetuning:', args.finetuning)
     model = get_model(vars(args), clf, config_dict_pretrain_stage, ckpt_pretrain_stage)
     model.to(device=device)
     clf.set_model(model)
@@ -182,7 +185,7 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define loss...")
 
-    loss = torch.nn.CrossEntropyLoss()
+    loss = torch.nn.CrossEntropyLoss(reduction='sum')
     clf.loss_fun = loss
 
     tqdm.write("Done!")
