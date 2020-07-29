@@ -13,8 +13,8 @@ def read_data_dataset_pretrain(path, get_characters, max_tokens, tokenizer_choic
             tokenizer = lambda s: s.lower().split()
         elif tokenizer_choice.lower() == 'distilbert-base-uncased':
             bert_model_name = tokenizer_choice.lower()
-            tokenizer = AutoTokenizer.from_pretrained(bert_model_name)
-            tokenizer = lambda s: tokenizer.tokenize(s)
+            autotokenizer = AutoTokenizer.from_pretrained(bert_model_name)
+            tokenizer = lambda s: autotokenizer.tokenize(s)
 
     doc = []
     with open(path, encoding='utf-8') as source:

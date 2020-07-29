@@ -52,7 +52,6 @@ class TextClassifierPretrain:
         tqdm.write("...Vocabulary built (size {:})...".format(len(self.voc)))
         # save vocabulary
         torch.save({'character': self.voc.character,
-                    'bag_of_chars': self.voc.bag_of_chars,
                     'max_voc_size': self.voc.max_voc_size,
                     'stoi': self.voc.stoi,
                     'itos': self.voc.itos},
@@ -129,7 +128,7 @@ class TextClassifierPretrain:
         else:
             self.model.eval()
         # for accuracy
-        logsm = nn.LogSoftmax(dim=1)
+        logsm = nn.LogSoftmax(dim=-1)
         pred_values = 0
         pred_naive = 0
         n_values = 0
@@ -141,32 +140,48 @@ class TextClassifierPretrain:
         bar = tqdm(initial=0, leave=True, total=len(loader.dataset.x) // self.seq_length,
                    desc=desc.format(ep, str_name, 0), position=0)
 
+        """# TODO:
+        self.perc_masked_token = 0.15
+        self.voc_mask_id = self.voc.get_mask_idx()
+        self.voc_size = len(self.voc)"""
+
         # loop over all batches
         for i, batch in enumerate(loader):
             # Send to device
             batch = batch.to(device=self.device)
             # create model input and targets
-            inp, target, indices = self.model.get_input_and_targets(batch)
+            inp, target = self.model.get_input_and_targets(batch)  # TODO model.
 
             if train:
                 # Reinitialize grad
                 self.model.zero_grad()
                 # Forward pass
-                output = self.model(inp, indices)
-                ll = self.loss_fun(output, target)
+                output = self.model(inp)
+                # output = output[0]  # TODO
+                ll = self.loss_fun(output.view(-1, len(self.voc)), target.view(-1))
                 # Backward pass
                 ll.backward()
                 clip_grad_norm_(self.model.parameters(), self.clip_value)
                 # Optimizer
                 self.optimizer.step()
+
+                # get correct prediction rate
+                out = logsm(output.view(-1, len(self.voc))).argmax(dim=-1)
+                pred_values += (out == target.view(-1)).cpu().sum().numpy()
+                pred_naive += (3 * torch.ones_like(out) == target.view(-1)).cpu().sum().numpy()
+                n_values += target.cpu().numel()
+
+                message = 'Pred Acc {:2.4f}%\tPred Naive {:2.4f}%' \
+                    .format(pred_values / n_values * 100, pred_naive / n_values * 100)
+                tqdm.write(message)
             else:
                 with torch.no_grad():
-                    output = self.model(inp, indices)
-                    ll = self.loss_fun(output, target)
+                    output = self.model(inp)
+                    ll = self.loss_fun(output.view(-1, len(self.voc)), target.view(-1))
                     # get correct prediction rate
-                    out = logsm(output).argmax(dim=1)
-                    pred_values += (out == target).cpu().sum().numpy()
-                    pred_naive += (3 * torch.ones_like(out) == target).cpu().sum().numpy()
+                    out = logsm(output.view(-1, len(self.voc))).argmax(dim=-1)
+                    pred_values += (out == target.view(-1)).cpu().sum().numpy()
+                    pred_naive += (3 * torch.ones_like(out) == target.view(-1)).cpu().sum().numpy()
                     n_values += target.cpu().numel()
             # Update
             total_loss += ll.detach().cpu().numpy()
@@ -180,3 +195,29 @@ class TextClassifierPretrain:
             return total_loss / n_entries
         else:
             return total_loss / n_entries, pred_values / n_values, pred_naive / n_values
+
+    def get_input_and_targets(self, x):
+        """
+        inputs are masked docs
+        targets are the values of the mask
+        """
+
+        inp = x
+        target = inp.clone()
+
+        # sample tokens in each sequence with probability self.perc_masked_token
+        probability_matrix = torch.full(target.shape, self.perc_masked_token)
+        masked_indices = torch.bernoulli(probability_matrix).bool()
+        target[~masked_indices] = -100  # only compute loss on masked tokens
+
+        # 80% we replace the masked input with as mask
+        indices_replaced = torch.bernoulli(torch.full(target.shape, 0.8)).bool() & masked_indices
+        inp[indices_replaced] = self.voc_mask_id
+
+        # 10% we replace masked input token with a random token
+        indices_random = torch.bernoulli(torch.full(target.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+        random_words = torch.randint(self.voc_size, target.shape, dtype=torch.long).to(device=inp.device)
+        inp[indices_random] = random_words[indices_random]
+
+        # remaining 10% we leave the correct token as input
+        return inp, target

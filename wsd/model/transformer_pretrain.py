@@ -119,32 +119,33 @@ class MyTransformer(nn.Module):
 
         self.embedding = nn.Embedding(self.voc_size, self.emb_dim)
         self.pos_encoder = PositionalEncoding(self.emb_dim, args['dropout_trans'])
+        self.embedding_norm = nn.LayerNorm(self.emb_dim)
         encoder_layers = TransformerEncoderLayer(self.emb_dim, args['num_heads'], args['dim_inner'],
                                                  args['dropout_trans'])
         self.transformer_encoder = TransformerEncoder(encoder_layers, args['num_trans_layers'])
-        self.decoder = nn.Linear(self.emb_dim, self.voc_size)
-        self.decoder_out = nn.Linear(self.seq_length, self.num_masked_token)
 
-    def forward(self, src, indices):
+        # LM decoder
+        self.dense = nn.Linear(self.emb_dim, self.emb_dim)
+        self.layer_norm = nn.LayerNorm(self.emb_dim)
+        self.decoder_layer = nn.Linear(self.emb_dim, self.voc_size)
+        self.decoder = nn.Sequential(
+            self.dense,
+            self.layer_norm,
+            nn.ReLU(),
+            self.decoder_layer
+        )
+
+    def forward(self, src):
         # process data
-        src1 = self.embedding(src) * math.sqrt(self.emb_dim)
-        src2 = src1.transpose(0, 1)
-        src3 = self.pos_encoder(src2)
-        src4 = self.transformer_encoder(src3)
+        src1 = self.embedding(src)
+        src2 = self.pos_encoder(src1)
+        src3 = self.embedding_norm(src2)
+        src4 = src3.transpose(0, 1)
+        src5 = self.transformer_encoder(src4)
 
-        # src4 is of shape (seq_length, batch_size, embedding_dim)
-        src5 = src4.permute(2, 1, 0)
-        # collect only the masked sequence values
-        out1 = src5.gather(2, indices.repeat(self.emb_dim, 1, 1))
-        # out1 is of shape (embedding_dim, batch_size, num_masked_tokens)
-        out2 = out1.permute(2, 1, 0)
-        out3 = self.decoder(out2)
-        # out3 is of shape (num_masked_tokens, batch_size, voc_size)
-        output = out3.permute(1, 2, 0)
-
-        """out1 = self.decoder(src4)
-        out2 = out1.permute(1, 2, 0)
-        output = self.decoder_out(out2)"""
+        # src5 is of shape (batch_size, seq_length, embedding_dim)
+        out1 = src5.transpose(0, 1)
+        output = self.decoder(out1)
 
         return output
 
@@ -159,32 +160,23 @@ class MyTransformer(nn.Module):
         inputs are masked docs
         targets are the values of the mask
         """
-        batch_size = x.size(0)
-        inp = copy.deepcopy(x)
-        target = torch.empty(batch_size, self.num_masked_token, dtype=inp.dtype).to(device=inp.device)
-        indices = []
-        # for each document in the batch
-        for i, _ in enumerate(x):
-            # get masking indices
-            masked_idx = np.random.choice(self.seq_length, self.num_masked_token, replace=False)
-            masked_idx.sort()
-            # get tokens of masked indices as targets
-            target[i, :] = copy.copy(inp[i, masked_idx])
-            # mask indices
-            length = len(masked_idx)
 
-            mask = np.random.choice(length, int(0.8 * length), replace=False)
-            # 80% masking
-            inp[i, masked_idx[mask]] = self.voc_mask_id
-            # 10% leaving, 10% random id
-            random_mask = list(range(length))
-            for elem in mask:
-                random_mask.remove(elem)
-            num_random = int((len(random_mask) + np.random.rand())//2)
-            random_val = torch.tensor(np.random.randint(3, self.voc_size, num_random)).to(device=inp.device)
-            inp[i, masked_idx[random_mask[:num_random]]] = random_val
-            # append all indices
-            indices.append(torch.tensor(masked_idx))
+        inp = x
+        target = inp.clone()
 
-        # return input, target
-        return inp, target, torch.stack(indices).to(device=inp.device)
+        # sample tokens in each sequence with probability self.perc_masked_token
+        probability_matrix = torch.full(target.shape, self.perc_masked_token)
+        masked_indices = torch.bernoulli(probability_matrix).bool()
+        target[~masked_indices] = -100  # only compute loss on masked tokens
+
+        # 80% we replace the masked input with as mask
+        indices_replaced = torch.bernoulli(torch.full(target.shape, 0.8)).bool() & masked_indices
+        inp[indices_replaced] = self.voc_mask_id
+
+        # 10% we replace masked input token with a random token
+        indices_random = torch.bernoulli(torch.full(target.shape, 0.5)).bool() & masked_indices & ~indices_replaced
+        random_words = torch.randint(self.voc_size, target.shape, dtype=torch.long).to(device=inp.device)
+        inp[indices_random] = random_words[indices_random]
+
+        # remaining 10% we leave the correct token as input
+        return inp, target

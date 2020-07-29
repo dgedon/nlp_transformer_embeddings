@@ -32,17 +32,12 @@ class TextClassifier:
         self.max_char_voc_size = args['max_char_voc_size']
         self.shuffle = True
 
-        self.bag_of_chars = args['bag_of_chars']
-        # self.trans_max_doc_words = args['trans_max_doc_words']
-        # self.trans_max_doc_chars = args['trans_max_doc_chars']
-
         self.device = device
 
         # define vocabulary
         if self.model_type in ['simple_word', 'simple_word_char', 'simple_char']:
             self.voc = Vocabulary(max_voc_size=self.max_voc_size, tokenizer_choice=self.tokenizer_choice)
             self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True,
-                                       bag_of_chars=self.bag_of_chars,
                                        tokenizer_choice=self.tokenizer_choice)
         if self.model_type in ['transformer_word']:
             temp = torch.load(os.path.join(settings["folder"], 'voc.pth'))
@@ -52,7 +47,6 @@ class TextClassifier:
             self.voc = Vocabulary(max_voc_size=self.max_voc_size, tokenizer_choice=self.tokenizer_choice,
                                   stoi=self.stoi, itos=self.itos)
             self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True,
-                                       bag_of_chars=self.bag_of_chars,
                                        tokenizer_choice=self.tokenizer_choice)
 
         self.lbl_enc = LabelEncoder()
@@ -82,7 +76,7 @@ class TextClassifier:
         self.n_classes = len(self.lbl_enc.classes_)
 
         # define data batcher (same padding for self.voc and self.char_voc)
-        self.batcher = DocumentBatcher(self.voc, self.bag_of_chars)
+        self.batcher = DocumentBatcher(self.voc)
 
         # batch the training data
         train_dataset = DocumentDataset(self.voc.encode(x_train), self.lbl_enc.transform(y_train),
@@ -198,7 +192,6 @@ class TextClassifier:
             # Compute the number of correct predictions, for the accuracy.
             guesses = scores.argmax(dim=1)
             n_correct += (guesses == y_batch).sum().item()
-            acc = n_correct / n_instances
 
             # Update train bar
             train_bar.desc = train_desc.format(ep, str_name, total_loss / n_instances)
@@ -206,11 +199,11 @@ class TextClassifier:
 
         train_bar.close()
 
-        return total_loss / n_instances, acc
+        return total_loss / n_instances, n_correct / n_instances
 
     def predict(self, x, word_pos):
         """Run a trained document classifier on a set of documents and return the predictions."""
-        batcher = DocumentBatcher(self.voc, self.bag_of_chars)  # , self.trans_max_doc_words, self.trans_max_doc_chars)
+        batcher = DocumentBatcher(self.voc)  # , self.trans_max_doc_words, self.trans_max_doc_chars)
 
         # Build a DataLoader to generate the batches, as above.
         dummy_labels = [self.lbl_enc.classes_[0] for _ in x]
@@ -231,7 +224,6 @@ class TextClassifier:
             x_char_batch = x_char_batch.to(self.device)
             src_char_key_padding_mask = src_char_key_padding_mask.to(self.device)
             # run
-            # TODO: include src_char_key_padding_mask
             model_inp = (word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask)
             # evaluate
             scores = self.model_best(model_inp)

@@ -46,17 +46,17 @@ if __name__ == '__main__':
     config_parser.add_argument("--bag_of_chars", type=bool, default=True,
                                help='Use bag of chars for transformers instead of [words in doc, chars in word] '
                                     '(default: True)')
-    config_parser.add_argument("--max_token", type=int, default=100000,
+    config_parser.add_argument("--max_token", type=int, default=5000000,
                                help='maximal number of used tokens for pretraining (default: tbd). '
                                     'Max 103 mio for words.')
-    config_parser.add_argument("--max_valid_token", type=int, default=100000,
+    config_parser.add_argument("--max_valid_token", type=int, default=10000,
                                help='maximal number of used tokens for validation in pretraining (default: tbd). '
                                     'Max 217 k for words.')
     # parameters for transformer
-    config_parser.add_argument('--transformer_type', choices=['words', 'chars'], default='words',
+    config_parser.add_argument('--transformer_type', choices=['words', 'chars'], default='chars',
                                help="Type of transformer to learn. Options: words, chars.")
     config_parser.add_argument("--tokenizer", choices=['distilbert-base-uncased', 'simple'],
-                               default='distilbert-base-uncased',  # 'simple', #
+                               default='simple',  #'distilbert-base-uncased',  # 'simple', #
                                help='use of tokenizer (default: None)')
     config_parser.add_argument('--seq_length', type=int, default=256,
                                help="Transformer training fixed sequence length. Default is 256.")
@@ -64,15 +64,27 @@ if __name__ == '__main__':
                                help="Number of attention heads. Default is 4.")
     config_parser.add_argument('--num_trans_layers', type=int, default=6,  # 12
                                help="Number of transformer blocks. Default is 3.")
-    config_parser.add_argument('--emb_dim', type=int, default=128,  # 512
+    config_parser.add_argument('--emb_dim', type=int, default=768,  #128, 512
                                help="Internal dimension of transformer. Default is 128.")
-    config_parser.add_argument('--dim_inner', type=int, default=256,  # 768
+    config_parser.add_argument('--dim_inner', type=int, default=2048,  #256, 768
                                help="Size of the FF network in the transformer. Default is 256.")
-    config_parser.add_argument('--dropout_trans', type=float, default=0.2,
+    config_parser.add_argument('--dropout_trans', type=float, default=0.1,
                                help='dropout rate of transformer (default: 0.2).')
     config_parser.add_argument('--perc_masked_token', type=float, default=0.15,
                                help="Percentage of total masked token. Default is 0.15.")
     args, rem_args = config_parser.parse_known_args()
+
+    """
+    BERT
+        hidden_size=768,
+        num_hidden_layers=12,
+        num_attention_heads=12,
+        intermediate_size=3072,
+        hidden_act="gelu",
+        hidden_dropout_prob=0.1,
+        attention_probs_dropout_prob=0.1,
+        max_position_embeddings=512,
+    """
 
     # System setting
     sys_parser = argparse.ArgumentParser(add_help=False)
@@ -142,6 +154,18 @@ if __name__ == '__main__':
     # Define the Model
     ###################################
     tqdm.write("Define model...")
+
+    from transformers import RobertaConfig
+    from transformers import RobertaForMaskedLM
+
+    """config = RobertaConfig(
+        vocab_size=len(clf.voc),
+        max_position_embeddings=514,
+        num_attention_heads=4,  # 12,
+        num_hidden_layers=6,
+        type_vocab_size=1,
+    )
+    model = RobertaForMaskedLM(config=config)"""
 
     model = MyTransformer(vars(args), clf)
     model.to(device=device)

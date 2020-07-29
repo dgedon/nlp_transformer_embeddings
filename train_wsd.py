@@ -38,10 +38,10 @@ if __name__ == '__main__':
     # Model parameters
     config_parser.add_argument("--model_type", choices=['simple_word', 'simple_char', 'simple_word_char',
                                                         'transformer_word', 'transformer_char', 'transformer_word_char'],
-                               default='transformer_word',
+                               default='simple_word_char',
                                help='model type.')
     config_parser.add_argument("--tokenizer", choices=['distilbert-base-uncased', 'simple'],
-                               default='distilbert-base-uncased',  #'simple',
+                               default='distilbert-base-uncased',  # 'distilbert-base-uncased',  #'simple',
                                help='use of tokenizer (default: None)')
     config_parser.add_argument("--max_voc_size", type=int, default=None,
                                help='maximal size of the vocabulary (default: None)')
@@ -69,7 +69,7 @@ if __name__ == '__main__':
                             help='data file for validation.')
     sys_parser.add_argument('--cuda', action='store_true',
                             help='use cuda for computations. (default: False)')
-    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/server/pretrain_word',  # '/wsd/'
+    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/',  #'/wsd/server/pretrain_word',  # '/wsd/'
                             help='output folder. If we pass /PATH/TO/FOLDER/ ending with `/`,'
                                  'it creates a folder `output_YYYY-MM-DD_HH_MM_SS_MMMMMM` inside it'
                                  'and save the content inside it. If it does not ends with `/`, the content is saved'
@@ -156,7 +156,6 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define model...")
 
-    print('args.finetuning:', args.finetuning)
     model = get_model(vars(args), clf, config_dict_pretrain_stage, ckpt_pretrain_stage)
     model.to(device=device)
     clf.set_model(model)
