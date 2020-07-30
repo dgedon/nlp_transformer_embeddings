@@ -1,7 +1,5 @@
 from tqdm import tqdm
-import copy
 import math
-import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn.modules.transformer import TransformerEncoder, TransformerEncoderLayer
@@ -16,7 +14,8 @@ class PretrainedTransformerBlock(nn.Module):
         self.freeze = freeze
         self.train_words = train_words
 
-        self.emb_dim = pretrained.decoder.in_features
+        self.emb_dim = pretrained.decoder[0].in_features
+        self.decoder = pretrained.decoder
 
         self.embedding = pretrained.embedding
         self.pos_encoder = pretrained.pos_encoder
@@ -54,6 +53,20 @@ class PretrainedTransformerBlock(nn.Module):
         cbof = out2.mean(dim=1)
 
         return cbof
+
+    def predict_mask_token(self, src):
+
+        # process data (no mask in transformer used)
+        src1 = self.embedding(src) * math.sqrt(self.emb_dim)
+        src2 = src1.transpose(0, 1)
+        src3 = self.pos_encoder(src2)
+        out1 = self.transformer_encoder(src3)
+
+        out2 = out1.transpose(0, 1)
+        # generate continuous bag of features
+        output = self.decoder(out2)
+
+        return output
 
 
 # %% Positional Encoder
@@ -137,10 +150,10 @@ class MyTransformer(nn.Module):
 
     def forward(self, src):
         # process data
-        src1 = self.embedding(src)
+        src1 = self.embedding(src) * math.sqrt(self.emb_dim)
         src2 = self.pos_encoder(src1)
-        src3 = self.embedding_norm(src2)
-        src4 = src3.transpose(0, 1)
+        src3 = src2.transpose(0, 1)
+        src4 = self.embedding_norm(src3)
         src5 = self.transformer_encoder(src4)
 
         # src5 is of shape (batch_size, seq_length, embedding_dim)
@@ -150,9 +163,7 @@ class MyTransformer(nn.Module):
         return output
 
     def get_pretrained(self, finetuning=False, train_words=False):
-        print('get_pretrained, finetuning:', finetuning)
         freeze = not finetuning
-        print('freeze: ', freeze)
         return PretrainedTransformerBlock(self, freeze, train_words)
 
     def get_input_and_targets(self, x):

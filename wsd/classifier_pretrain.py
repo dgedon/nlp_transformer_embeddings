@@ -165,6 +165,7 @@ class TextClassifierPretrain:
                 # Optimizer
                 self.optimizer.step()
 
+                """
                 # get correct prediction rate
                 out = logsm(output.view(-1, len(self.voc))).argmax(dim=-1)
                 pred_values += (out == target.view(-1)).cpu().sum().numpy()
@@ -173,7 +174,7 @@ class TextClassifierPretrain:
 
                 message = 'Pred Acc {:2.4f}%\tPred Naive {:2.4f}%' \
                     .format(pred_values / n_values * 100, pred_naive / n_values * 100)
-                tqdm.write(message)
+                tqdm.write(message)"""
             else:
                 with torch.no_grad():
                     output = self.model(inp)
@@ -196,12 +197,7 @@ class TextClassifierPretrain:
         else:
             return total_loss / n_entries, pred_values / n_values, pred_naive / n_values
 
-    def get_input_and_targets(self, x):
-        """
-        inputs are masked docs
-        targets are the values of the mask
-        """
-
+    """def get_input_and_targets(self, x):
         inp = x
         target = inp.clone()
 
@@ -220,4 +216,4 @@ class TextClassifierPretrain:
         inp[indices_random] = random_words[indices_random]
 
         # remaining 10% we leave the correct token as input
-        return inp, target
+        return inp, target"""
