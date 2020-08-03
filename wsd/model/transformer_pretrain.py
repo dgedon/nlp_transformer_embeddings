@@ -33,24 +33,23 @@ class PretrainedTransformerBlock(nn.Module):
             tqdm.write("...transformer requires_grad set to True...")
 
     def forward(self, src):
-        word_pos, x, src_key_padding_mask, x_char, src_char_key_padding_mask = src
+        x, x_char = src
 
         if self.train_words:
             inp = x
-            in_key_padding_mask = src_key_padding_mask
         else:
             inp = x_char
-            in_key_padding_mask = src_char_key_padding_mask
 
         # process data (no mask in transformer used)
         src1 = self.embedding(inp) * math.sqrt(self.emb_dim)
-        src2 = src1.transpose(0, 1)
-        src3 = self.pos_encoder(src2)
-        out1 = self.transformer_encoder(src3, src_key_padding_mask=in_key_padding_mask)
+        src2 = self.pos_encoder(src1)
+        src3 = src2.transpose(0, 1)
+        src4 = self.transformer_encoder(src3)
 
-        out2 = out1.transpose(0, 1)
+        # src4 is of shape (batch_Size, seq_length, embedding_dim)
+        out1 = src4.transpose(0, 1)
         # generate continuous bag of features
-        cbof = out2.mean(dim=1)
+        cbof = out1.mean(dim=1)
 
         return cbof
 
@@ -121,20 +120,19 @@ class MyTransformer(nn.Module):
         super(MyTransformer, self).__init__()
 
         self.voc_size = len(clf.voc)
+        self.voc_pad_id = clf.voc.get_pad_idx()
         self.voc_mask_id = clf.voc.get_mask_idx()
-        self.seq_length = args['seq_length']
 
         self.perc_masked_token = args['perc_masked_token']
-        # number of masked tokens
-        self.num_masked_token = int(self.perc_masked_token * self.seq_length)
 
         self.emb_dim = args["emb_dim"]
+        self.activation = args["activation_trans"]
 
         self.embedding = nn.Embedding(self.voc_size, self.emb_dim)
         self.pos_encoder = PositionalEncoding(self.emb_dim, args['dropout_trans'])
         self.embedding_norm = nn.LayerNorm(self.emb_dim)
         encoder_layers = TransformerEncoderLayer(self.emb_dim, args['num_heads'], args['dim_inner'],
-                                                 args['dropout_trans'])
+                                                 args['dropout_trans'], activation=self.activation)
         self.transformer_encoder = TransformerEncoder(encoder_layers, args['num_trans_layers'])
 
         # LM decoder
@@ -153,11 +151,10 @@ class MyTransformer(nn.Module):
         src1 = self.embedding(src) * math.sqrt(self.emb_dim)
         src2 = self.pos_encoder(src1)
         src3 = src2.transpose(0, 1)
-        src4 = self.embedding_norm(src3)
-        src5 = self.transformer_encoder(src4)
+        src4 = self.transformer_encoder(src3)
 
-        # src5 is of shape (batch_size, seq_length, embedding_dim)
-        out1 = src5.transpose(0, 1)
+        # src4 is of shape (batch_size, seq_length, embedding_dim)
+        out1 = src4.transpose(0, 1)
         output = self.decoder(out1)
 
         return output
@@ -175,8 +172,12 @@ class MyTransformer(nn.Module):
         inp = x
         target = inp.clone()
 
+        # padding mask
+        padding_token = self.voc_pad_id
+        padding_mask = (inp != padding_token).int()
+
         # sample tokens in each sequence with probability self.perc_masked_token
-        probability_matrix = torch.full(target.shape, self.perc_masked_token)
+        probability_matrix = torch.full(target.shape, self.perc_masked_token) * padding_mask
         masked_indices = torch.bernoulli(probability_matrix).bool()
         target[~masked_indices] = -100  # only compute loss on masked tokens
 
@@ -186,7 +187,7 @@ class MyTransformer(nn.Module):
 
         # 10% we replace masked input token with a random token
         indices_random = torch.bernoulli(torch.full(target.shape, 0.5)).bool() & masked_indices & ~indices_replaced
-        random_words = torch.randint(self.voc_size, target.shape, dtype=torch.long).to(device=inp.device)
+        random_words = torch.randint(self.voc_size, target.shape, dtype=torch.long)
         inp[indices_random] = random_words[indices_random]
 
         # remaining 10% we leave the correct token as input

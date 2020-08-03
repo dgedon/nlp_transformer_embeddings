@@ -7,7 +7,7 @@ from warnings import warn
 import json
 
 # user defined inputs
-from wsd.vocabulary import Vocabulary
+from wsd.vocabulary import VocabularyUpdated
 from wsd.model.transformer_pretrain import MyTransformer
 
 
@@ -80,14 +80,19 @@ if __name__ == '__main__':
     # adapt some parameters
     args.max_voc_size = config_dict_pretrain_stage['max_voc_size']
     args.bag_of_chars = True
-    args.tokenizer = config_dict_pretrain_stage['tokenizer']
 
     if args.model_type in ['transformer_word']:
-        temp = torch.load(os.path.join(settings.model_folder, 'voc.pth'))
-        max_voc_size = temp['max_voc_size']
-        stoi = temp['stoi']
-        itos = temp['itos']
-        voc = Vocabulary(max_voc_size=max_voc_size, tokenizer_choice=args.tokenizer, stoi=stoi, itos=itos)
+        try:
+            temp = torch.load(os.path.join(settings["folder"], 'voc.pth'))
+            max_char_voc_size = temp['max_voc_size']
+            stoi = temp['stoi']
+            itos = temp['itos']
+        except:
+            max_char_voc_size = args['max_char_voc_size']
+            stoi = None
+            itos = None
+        max_voc_size = None
+        voc = VocabularyUpdated(max_voc_size=max_voc_size, stoi=stoi, itos=itos)
 
         class DummyClf:
             def __init__(self, voc):

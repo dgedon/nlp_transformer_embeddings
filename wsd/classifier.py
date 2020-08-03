@@ -9,7 +9,7 @@ import numpy as np
 
 # user defined function
 from wsd.utils_train import read_data_dataset_finetuning, DocumentBatcher, DocumentDataset
-from wsd.vocabulary import Vocabulary
+from wsd.vocabulary import Vocabulary, VocabularyUpdated
 
 
 # %% Text classifier
@@ -18,8 +18,6 @@ class TextClassifier:
 
     def __init__(self, args, settings, device):
         self.model_type = args['model_type']
-        self.tokenizer_choice = args['tokenizer']
-
         self.seed = args['seed']
         self.epochs = args['epochs']
         self.valid_split = args['valid_split']
@@ -28,7 +26,10 @@ class TextClassifier:
         self.milestones = args['milestones']
         self.lr_factor = args['lr_factor']
 
-        self.max_voc_size = args['max_voc_size']
+        self.word_seq_length = args["seq_length_words"]
+        self.char_seq_length = args["seq_length_chars"]
+
+        self.max_voc_size = None
         self.max_char_voc_size = args['max_char_voc_size']
         self.shuffle = True
 
@@ -36,18 +37,21 @@ class TextClassifier:
 
         # define vocabulary
         if self.model_type in ['simple_word', 'simple_word_char', 'simple_char']:
-            self.voc = Vocabulary(max_voc_size=self.max_voc_size, tokenizer_choice=self.tokenizer_choice)
-            self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True,
-                                       tokenizer_choice=self.tokenizer_choice)
-        if self.model_type in ['transformer_word']:
-            temp = torch.load(os.path.join(settings["folder"], 'voc.pth'))
-            self.max_voc_size = temp['max_voc_size']
-            self.stoi = temp['stoi']
-            self.itos = temp['itos']
-            self.voc = Vocabulary(max_voc_size=self.max_voc_size, tokenizer_choice=self.tokenizer_choice,
-                                  stoi=self.stoi, itos=self.itos)
-            self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True,
-                                       tokenizer_choice=self.tokenizer_choice)
+            self.voc = VocabularyUpdated(max_voc_size=self.max_voc_size)
+            self.char_voc = VocabularyUpdated(max_voc_size=self.max_char_voc_size, character=True)
+        if self.model_type in ['transformer_word', 'transformer_char', 'transformer_word_char']:
+            try:
+                temp = torch.load(os.path.join(settings["folder"], 'voc.pth'))
+                self.max_char_voc_size = temp['max_voc_size']
+                self.stoi = temp['stoi']
+                self.itos = temp['itos']
+            except:
+                self.max_char_voc_size = args['max_char_voc_size']
+                self.stoi = None
+                self.itos = None
+
+            self.voc = VocabularyUpdated(max_voc_size=self.max_voc_size, stoi=self.stoi, itos=self.itos)
+            self.char_voc = VocabularyUpdated(max_voc_size=self.max_char_voc_size, character=True)
 
         self.lbl_enc = LabelEncoder()
 
@@ -63,10 +67,8 @@ class TextClassifier:
                                                                                               random_state=self.seed,
                                                                                               shuffle=self.shuffle)
 
-        # build the vocabulary
-        self.voc.build(x_train)
         self.voc_size = len(self.voc)
-        tqdm.write("...word vocabulary built (size {:})...".format(self.voc_size))
+        tqdm.write("...word vocabulary done (size {:})...".format(self.voc_size))
         # also build a vocabulary for characters
         self.char_voc.build(x_train)
         self.char_voc_size = len(self.char_voc)
@@ -76,7 +78,7 @@ class TextClassifier:
         self.n_classes = len(self.lbl_enc.classes_)
 
         # define data batcher (same padding for self.voc and self.char_voc)
-        self.batcher = DocumentBatcher(self.voc)
+        self.batcher = DocumentBatcher(self.voc, self.word_seq_length, self.char_seq_length)
 
         # batch the training data
         train_dataset = DocumentDataset(self.voc.encode(x_train), self.lbl_enc.transform(y_train),
@@ -132,8 +134,6 @@ class TextClassifier:
                 # Update best validation accuracy
                 best_valid_acc = valid_acc
                 tqdm.write("Save model (best)!")
-            # Call optimizer step
-            self.scheduler.step()
             # Save last model
             if ep == self.epochs - 1:
                 torch.save({'model': self.model.state_dict(),
@@ -162,18 +162,16 @@ class TextClassifier:
                          desc=train_desc.format(ep, str_name, 0), position=0)
 
         for i, batch in enumerate(batches):
-            y_batch, word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask = batch
+            y_batch, x_batch, x_char_batch = batch
             y_batch = y_batch.to(self.device)
             x_batch = x_batch.to(self.device)
-            src_key_padding_mask = src_key_padding_mask.to(self.device)
             x_char_batch = x_char_batch.to(self.device)
-            src_char_key_padding_mask = src_char_key_padding_mask.to(self.device)
 
             # Reinitialize grad
             self.model.zero_grad()
             self.optimizer.zero_grad()
             # Forward pass
-            model_inp = (word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask)
+            model_inp = (x_batch, x_char_batch)
             scores = self.model(model_inp)
             # Compute the loss for this batch.
             loss = self.loss_fun(scores, y_batch)
@@ -198,12 +196,15 @@ class TextClassifier:
             train_bar.update(bs)
 
         train_bar.close()
+        # Call optimizer step
+        if do_train:
+            self.scheduler.step()
 
         return total_loss / n_instances, n_correct / n_instances
 
     def predict(self, x, word_pos):
         """Run a trained document classifier on a set of documents and return the predictions."""
-        batcher = DocumentBatcher(self.voc)  # , self.trans_max_doc_words, self.trans_max_doc_chars)
+        batcher = DocumentBatcher(self.voc, self.word_seq_length, self.char_seq_length)
 
         # Build a DataLoader to generate the batches, as above.
         dummy_labels = [self.lbl_enc.classes_[0] for _ in x]
@@ -215,16 +216,13 @@ class TextClassifier:
         # Apply the model to all the batches and aggregate the predictions.
         self.model_best.eval()
         output = []
-        for y_batch, word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask in loader:
+        for y_batch, x_batch, x_char_batch in loader:
             # to device
             y_batch = y_batch.to(self.device)
-            word_pos_batch = word_pos_batch.to(self.device)
             x_batch = x_batch.to(self.device)
-            src_key_padding_mask = src_key_padding_mask.to(self.device)
             x_char_batch = x_char_batch.to(self.device)
-            src_char_key_padding_mask = src_char_key_padding_mask.to(self.device)
             # run
-            model_inp = (word_pos_batch, x_batch, src_key_padding_mask, x_char_batch, src_char_key_padding_mask)
+            model_inp = (x_batch, x_char_batch)
             # evaluate
             scores = self.model_best(model_inp)
             guesses = scores.argmax(dim=1)

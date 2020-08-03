@@ -8,10 +8,9 @@ import torch.nn as nn
 import os
 import numpy as np
 
-
 from wsd.classifier_pretrain import TextClassifierPretrain
 from wsd.model.transformer_pretrain import MyTransformer
-
+from wsd.utils_pretrain import get_linear_schedule_with_warmup
 
 
 if __name__ == '__main__':
@@ -24,52 +23,44 @@ if __name__ == '__main__':
     config_parser = argparse.ArgumentParser(add_help=False)
     config_parser.add_argument('--seed', type=int, default=2,
                                help='random seed for number generator (default: 2)')
-    config_parser.add_argument('--epochs', type=int, default=100,
+    config_parser.add_argument('--epochs', type=int, default=40,
                                help='maximum number of epochs (default: 100)')
-    config_parser.add_argument('--batch_size', type=int, default=32,
-                               help='batch size (default: 32).')
+    config_parser.add_argument('--batch_size', type=int, default=16,
+                               help='batch size (default: 16).')
     config_parser.add_argument('--valid_split', type=float, default=0.30,
                                help='fraction of the data used for validation (default: 0.1).')
-    config_parser.add_argument('--lr', type=float, default=1e-3,
-                               help='learning rate (default: 0.001)')
-    config_parser.add_argument('--milestones', nargs='+', type=int,
-                               default=[40, 60, 80],
-                               help='milestones for lr scheduler (default: [40, 60, 80])')
-    config_parser.add_argument("--lr_factor", type=float, default=0.1,
-                               help='reducing factor for the lr in a plateau (default: 0.1)')
+    config_parser.add_argument('--lr', type=float, default=5e-5,
+                               help='learning rate (default: 5e-5)')
     config_parser.add_argument('--clip_value', type=float, default=1.0,
                                help='maximum value for the gradient norm (default: 1.0)')
-    config_parser.add_argument("--max_voc_size", type=int, default=None,
-                               help='maximal size of the vocabulary (default: None)')
     config_parser.add_argument("--max_char_voc_size", type=int, default=None,
                                help='maximal size of the character vocabulary (default: None)')
     config_parser.add_argument("--bag_of_chars", type=bool, default=True,
                                help='Use bag of chars for transformers instead of [words in doc, chars in word] '
                                     '(default: True)')
-    config_parser.add_argument("--max_token", type=int, default=5000000,
+    config_parser.add_argument("--max_token", type=int, default=1_000_000,
                                help='maximal number of used tokens for pretraining (default: tbd). '
                                     'Max 103 mio for words.')
-    config_parser.add_argument("--max_valid_token", type=int, default=10000,
+    config_parser.add_argument("--max_valid_token", type=int, default=10_000,
                                help='maximal number of used tokens for validation in pretraining (default: tbd). '
                                     'Max 217 k for words.')
     # parameters for transformer
-    config_parser.add_argument('--transformer_type', choices=['words', 'chars'], default='words',
+    config_parser.add_argument('--transformer_type', choices=['words', 'chars'], default='chars',
                                help="Type of transformer to learn. Options: words, chars.")
-    config_parser.add_argument("--tokenizer", choices=['distilbert-base-uncased', 'simple'],
-                               default='distilbert-base-uncased',  #'distilbert-base-uncased',  # 'simple', #
-                               help='use of tokenizer (default: None)')
-    config_parser.add_argument('--seq_length', type=int, default=256,
-                               help="Transformer training fixed sequence length. Default is 256.")
-    config_parser.add_argument('--num_heads', type=int, default=4,  # 8
+    config_parser.add_argument('--seq_length', type=int, default=128,
+                               help="Transformer training fixed sequence length. Default is 128.")
+    config_parser.add_argument('--num_heads', type=int, default=8,
                                help="Number of attention heads. Default is 4.")
-    config_parser.add_argument('--num_trans_layers', type=int, default=6,  # 12
+    config_parser.add_argument('--num_trans_layers', type=int, default=4,
                                help="Number of transformer blocks. Default is 3.")
-    config_parser.add_argument('--emb_dim', type=int, default=128,  #128, 512
+    config_parser.add_argument('--emb_dim', type=int, default=128,
                                help="Internal dimension of transformer. Default is 128.")
-    config_parser.add_argument('--dim_inner', type=int, default=256,  #256, 768
+    config_parser.add_argument('--dim_inner', type=int, default=256,
                                help="Size of the FF network in the transformer. Default is 256.")
-    config_parser.add_argument('--dropout_trans', type=float, default=0.2,
-                               help='dropout rate of transformer (default: 0.2).')
+    config_parser.add_argument('--dropout_trans', type=float, default=0.1,
+                               help='dropout rate of transformer (default: 0.1).')
+    config_parser.add_argument('--activation_trans', choices=['relu', 'gelu'], default='gelu',
+                               help='activation function of transformer (default: relu).')
     config_parser.add_argument('--perc_masked_token', type=float, default=0.15,
                                help="Percentage of total masked token. Default is 0.15.")
     args, rem_args = config_parser.parse_known_args()
@@ -143,18 +134,6 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define model...")
 
-    from transformers import RobertaConfig
-    from transformers import RobertaForMaskedLM
-
-    """config = RobertaConfig(
-        vocab_size=len(clf.voc),
-        max_position_embeddings=514,
-        num_attention_heads=4,  # 12,
-        num_hidden_layers=6,
-        type_vocab_size=1,
-    )
-    model = RobertaForMaskedLM(config=config)"""
-
     model = MyTransformer(vars(args), clf)
     model.to(device=device)
     clf.set_model(model)
@@ -165,7 +144,29 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define optimizer...")
 
-    optimizer = torch.optim.Adam(model.parameters(), args.lr)
+    # Prepare optimizer and schedule (linear warmup and decay)
+    no_decay = ["bias", "LayerNorm.weight"]
+    optimizer_grouped_parameters = [
+        {
+            "params": [p for n, p in clf.model.named_parameters() if not any(nd in n for nd in no_decay)],
+            "weight_decay": 0.0,
+        },
+        {
+            "params": [p for n, p in clf.model.named_parameters() if any(nd in n for nd in no_decay)],
+            "weight_decay": 0.0,
+        },
+    ]
+    #adam_beta1 = 0.9
+    #adam_beta2 = 0.999
+    #learning_rate = 5e-5
+    #adam_epsilon = 1e-8
+    optimizer = torch.optim.AdamW(
+        optimizer_grouped_parameters,
+        lr=args.lr,
+        #betas=(adam_beta1, adam_beta2),
+        #eps=adam_epsilon,
+    )
+    # optimizer = torch.optim.Adam(clf.model.parameters(), args.lr)
     clf.optimizer = optimizer
 
     tqdm.write("Done!")
@@ -174,7 +175,10 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define scheduler...")
 
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.lr_factor)
+    temp = 1 if len(train_loader.dataset.x) % args.batch_size != 0 else 0
+    num_training_steps = len(train_loader.dataset.x)//args.batch_size + temp
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_training_steps=num_training_steps)
+    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.lr_factor)
     clf.scheduler = scheduler
 
     tqdm.write("Done!")

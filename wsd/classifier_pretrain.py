@@ -8,9 +8,10 @@ import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
 
 # user defined function
-from wsd.utils_train import read_data_dataset_finetuning
-from wsd.utils_pretrain import read_data_dataset_pretrain, DocumentBatcherPretrain, DocumentDatasetPretrain
-from wsd.vocabulary import Vocabulary
+from wsd.utils_train import read_data_dataset_finetuning, DocumentBatcher, DocumentDataset
+from wsd.utils_pretrain import read_data_dataset_pretrain, DocumentBatcherPretrain, DocumentDatasetPretrain, \
+    read_data_dataset_pretrain_new, DocumentBatcherPretrain_new, DocumentDatasetPretrain_new
+from wsd.vocabulary import Vocabulary, VocabularyUpdated
 
 
 # %% Text classifier
@@ -18,61 +19,67 @@ class TextClassifierPretrain:
     """A text classifier based on a neural network."""
 
     def __init__(self, args, device):
-        self.do_chars = True if args["transformer_type"] == 'chars' else False
-        self.tokenizer_choice = args['tokenizer']
+        self.character = True if args["transformer_type"] == 'chars' else False
 
         self.seed = args['seed']
         self.epochs = args['epochs']
         self.batch_size = args['batch_size']
         self.lr = args['lr']
-        self.milestones = args['milestones']
-        self.lr_factor = args['lr_factor']
         self.clip_value = args['clip_value']
 
         self.seq_length = args['seq_length']
-        if self.do_chars:
+        if self.character:
             self.max_voc_size = args['max_char_voc_size']
         else:
-            self.max_voc_size = args['max_voc_size']
+            # not used
+            self.max_voc_size = None
         self.max_token = args['max_token']
         self.max_valid_token = args['max_valid_token']
 
         self.device = device
 
         # define vocabulary
-        self.voc = Vocabulary(max_voc_size=self.max_voc_size, character=self.do_chars,
-                              tokenizer_choice=self.tokenizer_choice)
+        self.voc = VocabularyUpdated(max_voc_size=self.max_voc_size, character=self.character)
 
     def preprocess(self, data_path_finetuning, data_path_pretrain, folder):
         """Carry out the document preprocessing, then build `DataLoader`s for the training and validation sets."""
 
-        # build the vocabulary according to finetuning data
-        x_finetune, _, _, _ = read_data_dataset_finetuning(data_path_finetuning)
-        self.voc.build(x_finetune)
+        # get pretraining data
+        path = os.path.join(data_path_pretrain, 'wiki.train.tokens')
+        x_train = read_data_dataset_pretrain_new(path, get_characters=self.character, max_tokens=self.max_token)
+        path = os.path.join(data_path_pretrain, 'wiki.valid.tokens')
+        x_valid = read_data_dataset_pretrain_new(path, get_characters=self.character, max_tokens=self.max_valid_token)
+
+        if self.character:
+            self.voc.build(x_train)
+            tqdm.write("...Vocabulary built (size {:})...".format(len(self.voc)))
+            # save vocabulary
+            torch.save({'character': self.voc.character,
+                        'max_voc_size': self.voc.max_voc_size,
+                        'stoi': self.voc.stoi,
+                        'itos': self.voc.itos},
+                       os.path.join(folder, 'voc.pth'))
+        else:
+            tqdm.write("...Vocabulary built (size {:})...".format(len(self.voc)))
+
+        """# build the vocabulary
+        self.voc.build(x_train)
         tqdm.write("...Vocabulary built (size {:})...".format(len(self.voc)))
         # save vocabulary
         torch.save({'character': self.voc.character,
                     'max_voc_size': self.voc.max_voc_size,
                     'stoi': self.voc.stoi,
                     'itos': self.voc.itos},
-                   os.path.join(folder, 'voc.pth'))
+                   os.path.join(folder, 'voc.pth'))"""
 
-        # get pretraining data (just one long string)
-        path = os.path.join(data_path_pretrain, 'wiki.train.tokens')
-        x_train = read_data_dataset_pretrain(path, get_characters=self.do_chars, max_tokens=self.max_token,
-                                             tokenizer_choice=self.tokenizer_choice)
-        path = os.path.join(data_path_pretrain, 'wiki.valid.tokens')
-        x_valid = read_data_dataset_pretrain(path, get_characters=self.do_chars, max_tokens=self.max_valid_token,
-                                             tokenizer_choice=self.tokenizer_choice)
-
-        batcher = DocumentBatcherPretrain(self.seq_length)
+        batcher = DocumentBatcherPretrain_new(self.voc, self.seq_length)
         # encode pretraining data with vocabulary from finetuning data
-        encoded_train = self.voc.encode_pretrain(x_train)
-        train_dataset = DocumentDatasetPretrain(encoded_train, self.seq_length)
+        encoded_train = self.voc.encode(x_train)
+        train_dataset = DocumentDatasetPretrain_new(encoded_train)  # , self.seq_length)
         train_loader = DataLoader(train_dataset, self.batch_size, collate_fn=batcher)
 
-        encoded_valid = self.voc.encode_pretrain(x_valid)
-        valid_dataset = DocumentDatasetPretrain(encoded_valid, self.seq_length)
+        encoded_valid = self.voc.encode(x_valid)
+        valid_dataset = DocumentDatasetPretrain_new(encoded_valid)  # , self.seq_length)
         valid_loader = DataLoader(valid_dataset, self.batch_size, collate_fn=batcher)
 
         return train_loader, valid_loader
@@ -119,8 +126,8 @@ class TextClassifierPretrain:
                             'optimizer': self.optimizer.state_dict()},
                            os.path.join(folder, 'pretrain_final_model.pth'))
                 tqdm.write("Save model (last)!")
-            # Call optimizer step
-            self.scheduler.step()
+            """# Call optimizer step
+            self.scheduler.step()"""
 
     def selfsupervised(self, ep, loader, train):
         if train:
@@ -136,68 +143,59 @@ class TextClassifierPretrain:
         total_loss = 0
         n_entries = 0
         str_name = 'train' if train else 'val'
-        desc = "Epoch {:2d}: {} - Loss: {:2.3e}"
-        bar = tqdm(initial=0, leave=True, total=len(loader.dataset.x) // self.seq_length,
-                   desc=desc.format(ep, str_name, 0), position=0)
-
-        """# TODO:
-        self.perc_masked_token = 0.15
-        self.voc_mask_id = self.voc.get_mask_idx()
-        self.voc_size = len(self.voc)"""
+        desc = "Epoch {:2d}: {}, Loss: {:2.3e}, Pred Acc {:2.3f}%"
+        temp = 1 if len(loader.dataset.x) % self.batch_size != 0 else 0
+        bar_len = len(loader.dataset.x) // self.batch_size + temp
+        bar = tqdm(initial=0, leave=True, total=bar_len,
+                   desc=desc.format(ep, str_name, 0, 0), position=0)
 
         # loop over all batches
         for i, batch in enumerate(loader):
-            # Send to device
-            batch = batch.to(device=self.device)
             # create model input and targets
-            inp, target = self.model.get_input_and_targets(batch)  # TODO model.
+            inp, target = self.model.get_input_and_targets(batch)
+            # Send to device
+            inp = inp.to(device=self.device)
+            target = target.to(device=self.device)
 
             if train:
                 # Reinitialize grad
                 self.model.zero_grad()
                 # Forward pass
                 output = self.model(inp)
-                # output = output[0]  # TODO
                 ll = self.loss_fun(output.view(-1, len(self.voc)), target.view(-1))
                 # Backward pass
                 ll.backward()
                 clip_grad_norm_(self.model.parameters(), self.clip_value)
                 # Optimizer
                 self.optimizer.step()
+                self.scheduler.step()
 
-                """
-                # get correct prediction rate
-                out = logsm(output.view(-1, len(self.voc))).argmax(dim=-1)
-                pred_values += (out == target.view(-1)).cpu().sum().numpy()
-                pred_naive += (3 * torch.ones_like(out) == target.view(-1)).cpu().sum().numpy()
-                n_values += target.cpu().numel()
-
-                message = 'Pred Acc {:2.4f}%\tPred Naive {:2.4f}%' \
-                    .format(pred_values / n_values * 100, pred_naive / n_values * 100)
-                tqdm.write(message)"""
             else:
                 with torch.no_grad():
                     output = self.model(inp)
                     ll = self.loss_fun(output.view(-1, len(self.voc)), target.view(-1))
-                    # get correct prediction rate
-                    out = logsm(output.view(-1, len(self.voc))).argmax(dim=-1)
-                    pred_values += (out == target.view(-1)).cpu().sum().numpy()
-                    pred_naive += (3 * torch.ones_like(out) == target.view(-1)).cpu().sum().numpy()
-                    n_values += target.cpu().numel()
+            # get correct prediction rate
+            batch = batch.to(device=self.device)
+            mask = (inp != 1).int()
+            out = logsm(output).argmax(dim=-1)
+            pred_values += (out == batch * mask).cpu().sum().numpy()
+            pred_naive += (5 * torch.ones_like(out) == target*mask).cpu().sum().numpy()
+            n_values += mask.sum().item()
+
             # Update
             total_loss += ll.detach().cpu().numpy()
             bs = batch.size(0)
             n_entries += bs
             # Update train bar
-            bar.desc = desc.format(ep, str_name, total_loss / n_entries)
-            bar.update(bs)
+            bar.desc = desc.format(ep, str_name, total_loss / n_entries, pred_values / n_values * 100)
+            bar.update()  # bs
         bar.close()
         if train:
             return total_loss / n_entries
         else:
             return total_loss / n_entries, pred_values / n_values, pred_naive / n_values
 
-    """def get_input_and_targets(self, x):
+    def get_input_and_targets(self, x):
         inp = x
         target = inp.clone()
 
@@ -216,4 +214,4 @@ class TextClassifierPretrain:
         inp[indices_random] = random_words[indices_random]
 
         # remaining 10% we leave the correct token as input
-        return inp, target"""
+        return inp, target
