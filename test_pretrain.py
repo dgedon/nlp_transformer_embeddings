@@ -7,7 +7,7 @@ from warnings import warn
 import json
 
 # user defined inputs
-from wsd.vocabulary import VocabularyUpdated
+from wsd.vocabulary import Vocabulary
 from wsd.model.transformer_pretrain import MyTransformer
 
 
@@ -92,7 +92,7 @@ if __name__ == '__main__':
             stoi = None
             itos = None
         max_voc_size = None
-        voc = VocabularyUpdated(max_voc_size=max_voc_size, stoi=stoi, itos=itos)
+        voc = Vocabulary(max_voc_size=max_voc_size, stoi=stoi, itos=itos)
 
         class DummyClf:
             def __init__(self, voc):

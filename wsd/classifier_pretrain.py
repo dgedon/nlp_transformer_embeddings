@@ -8,10 +8,8 @@ import torch.nn as nn
 from torch.nn.utils import clip_grad_norm_
 
 # user defined function
-from wsd.utils_train import read_data_dataset_finetuning, DocumentBatcher, DocumentDataset
-from wsd.utils_pretrain import read_data_dataset_pretrain, DocumentBatcherPretrain, DocumentDatasetPretrain, \
-    read_data_dataset_pretrain_new, DocumentBatcherPretrain_new, DocumentDatasetPretrain_new
-from wsd.vocabulary import Vocabulary, VocabularyUpdated
+from wsd.utils_pretrain import read_data_dataset_pretrain, DocumentBatcherPretrain, DocumentDatasetPretrain
+from wsd.vocabulary import Vocabulary
 
 
 # %% Text classifier
@@ -37,18 +35,21 @@ class TextClassifierPretrain:
         self.max_valid_token = args['max_valid_token']
 
         self.device = device
+        self.shuffle = True
 
         # define vocabulary
-        self.voc = VocabularyUpdated(max_voc_size=self.max_voc_size, character=self.character)
+        self.voc = Vocabulary(max_voc_size=self.max_voc_size, character=self.character)
 
-    def preprocess(self, data_path_finetuning, data_path_pretrain, folder):
+    def preprocess(self, data_path_pretrain, folder):
         """Carry out the document preprocessing, then build `DataLoader`s for the training and validation sets."""
 
         # get pretraining data
         path = os.path.join(data_path_pretrain, 'wiki.train.tokens')
-        x_train = read_data_dataset_pretrain_new(path, get_characters=self.character, max_tokens=self.max_token)
+        x_train = read_data_dataset_pretrain(path, get_characters=self.character, max_tokens=self.max_token,
+                                             seq_length=self.seq_length)
         path = os.path.join(data_path_pretrain, 'wiki.valid.tokens')
-        x_valid = read_data_dataset_pretrain_new(path, get_characters=self.character, max_tokens=self.max_valid_token)
+        x_valid = read_data_dataset_pretrain(path, get_characters=self.character, max_tokens=self.max_valid_token,
+                                             seq_length=self.seq_length)
 
         if self.character:
             self.voc.build(x_train)
@@ -62,25 +63,15 @@ class TextClassifierPretrain:
         else:
             tqdm.write("...Vocabulary built (size {:})...".format(len(self.voc)))
 
-        """# build the vocabulary
-        self.voc.build(x_train)
-        tqdm.write("...Vocabulary built (size {:})...".format(len(self.voc)))
-        # save vocabulary
-        torch.save({'character': self.voc.character,
-                    'max_voc_size': self.voc.max_voc_size,
-                    'stoi': self.voc.stoi,
-                    'itos': self.voc.itos},
-                   os.path.join(folder, 'voc.pth'))"""
-
-        batcher = DocumentBatcherPretrain_new(self.voc, self.seq_length)
+        batcher = DocumentBatcherPretrain(self.voc, self.seq_length)
         # encode pretraining data with vocabulary from finetuning data
         encoded_train = self.voc.encode(x_train)
-        train_dataset = DocumentDatasetPretrain_new(encoded_train)  # , self.seq_length)
-        train_loader = DataLoader(train_dataset, self.batch_size, collate_fn=batcher)
+        train_dataset = DocumentDatasetPretrain(encoded_train)  # , self.seq_length)
+        train_loader = DataLoader(train_dataset, self.batch_size, collate_fn=batcher, shuffle=self.shuffle)
 
         encoded_valid = self.voc.encode(x_valid)
-        valid_dataset = DocumentDatasetPretrain_new(encoded_valid)  # , self.seq_length)
-        valid_loader = DataLoader(valid_dataset, self.batch_size, collate_fn=batcher)
+        valid_dataset = DocumentDatasetPretrain(encoded_valid)  # , self.seq_length)
+        valid_loader = DataLoader(valid_dataset, self.batch_size, collate_fn=batcher, shuffle=self.shuffle)
 
         return train_loader, valid_loader
 
@@ -126,8 +117,6 @@ class TextClassifierPretrain:
                             'optimizer': self.optimizer.state_dict()},
                            os.path.join(folder, 'pretrain_final_model.pth'))
                 tqdm.write("Save model (last)!")
-            """# Call optimizer step
-            self.scheduler.step()"""
 
     def selfsupervised(self, ep, loader, train):
         if train:

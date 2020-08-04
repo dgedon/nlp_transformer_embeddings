@@ -52,15 +52,8 @@ class DocumentBatcher:
         x_padded = torch.as_tensor(
             [x[:max_doc_len] + [self.pad] * (max_doc_len - len(x[:max_doc_len])) for x, _, _, _ in data])
 
-        """# generate word padding mask (0 for non padded, 1 for padded)
-        src_key_padding_mask = torch.as_tensor(
-            [len(x[:max_doc_len]) * [0] + [1] * (max_doc_len - len(x[:max_doc_len])) for x, _, _, _ in data]).bool()"""
-
         # Build the label tensor.
         y = torch.as_tensor([y for _, y, _, _ in data])
-
-        """# Build the word position tensor.
-        word_pos = torch.as_tensor([pos for _, _, pos, _ in data])"""
 
         # check if we need a bag of characters or if we have characters for each word
         # how long (many chars) is the longest document?
@@ -71,9 +64,4 @@ class DocumentBatcher:
         x_char_padded = torch.as_tensor(
             [x_char[:max_doc_len] + [self.pad] * (max_doc_len - len(x_char[:max_doc_len])) for _, _, _, x_char in data])
 
-        """# generate char padding mask (0 for non padded, 1 for padded)
-        src_char_key_padding_mask = torch.as_tensor(
-            [len(x_char[:max_doc_len]) * [0] + [1] * (max_doc_len - len(x_char[:max_doc_len])) for _, _, _, x_char in data]).bool()"""
-
-        """return y, word_pos, x_padded, src_key_padding_mask, x_char_padded, src_char_key_padding_mask"""
         return y, x_padded, x_char_padded

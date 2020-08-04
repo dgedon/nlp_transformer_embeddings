@@ -9,7 +9,7 @@ import numpy as np
 
 # user defined function
 from wsd.utils_train import read_data_dataset_finetuning, DocumentBatcher, DocumentDataset
-from wsd.vocabulary import Vocabulary, VocabularyUpdated
+from wsd.vocabulary import Vocabulary
 
 
 # %% Text classifier
@@ -22,9 +22,6 @@ class TextClassifier:
         self.epochs = args['epochs']
         self.valid_split = args['valid_split']
         self.batch_size = args['batch_size']
-        self.lr = args['lr']
-        self.milestones = args['milestones']
-        self.lr_factor = args['lr_factor']
 
         self.word_seq_length = args["seq_length_words"]
         self.char_seq_length = args["seq_length_chars"]
@@ -37,8 +34,8 @@ class TextClassifier:
 
         # define vocabulary
         if self.model_type in ['simple_word', 'simple_word_char', 'simple_char']:
-            self.voc = VocabularyUpdated(max_voc_size=self.max_voc_size)
-            self.char_voc = VocabularyUpdated(max_voc_size=self.max_char_voc_size, character=True)
+            self.voc = Vocabulary(max_voc_size=self.max_voc_size)
+            self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True)
         if self.model_type in ['transformer_word', 'transformer_char', 'transformer_word_char']:
             try:
                 temp = torch.load(os.path.join(settings["folder"], 'voc.pth'))
@@ -50,8 +47,8 @@ class TextClassifier:
                 self.stoi = None
                 self.itos = None
 
-            self.voc = VocabularyUpdated(max_voc_size=self.max_voc_size, stoi=self.stoi, itos=self.itos)
-            self.char_voc = VocabularyUpdated(max_voc_size=self.max_char_voc_size, character=True)
+            self.voc = Vocabulary(max_voc_size=self.max_voc_size, stoi=self.stoi, itos=self.itos)
+            self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True)
 
         self.lbl_enc = LabelEncoder()
 
@@ -68,7 +65,7 @@ class TextClassifier:
                                                                                               shuffle=self.shuffle)
 
         self.voc_size = len(self.voc)
-        tqdm.write("...word vocabulary done (size {:})...".format(self.voc_size))
+        tqdm.write("...word vocabulary built (size {:})...".format(self.voc_size))
         # also build a vocabulary for characters
         self.char_voc.build(x_train)
         self.char_voc_size = len(self.char_voc)
@@ -112,9 +109,9 @@ class TextClassifier:
             for param_group in self.optimizer.param_groups:
                 learning_rate = param_group["lr"]
             # Print message
-            message = 'Epoch {:2d}: \tTrain Loss {:.6f} ' \
-                      '\tValid Loss {:.6f} \tLearning Rate {:.7f}\t' \
-                      'Train Acc: {:.3f} \tValid Acc: {:.3f} ' \
+            message = 'Epoch {:2d}: \tTrain Loss {:2.3e} ' \
+                      '\tValid Loss {:2.3e} \tLearning Rate {:1.2e}\t' \
+                      'Train Acc: {:2.4f} \tValid Acc: {:2.4f} ' \
                 .format(ep, train_loss, valid_loss, learning_rate, train_acc, valid_acc)
             tqdm.write(message)
             # Save history
@@ -181,6 +178,8 @@ class TextClassifier:
                 loss.backward()
                 # Optimize
                 self.optimizer.step()
+                # scheduler
+                self.scheduler.step()
 
             # Update
             total_loss += loss.detach().cpu().numpy()
@@ -196,9 +195,6 @@ class TextClassifier:
             train_bar.update(bs)
 
         train_bar.close()
-        # Call optimizer step
-        if do_train:
-            self.scheduler.step()
 
         return total_loss / n_instances, n_correct / n_instances
 

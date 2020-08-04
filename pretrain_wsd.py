@@ -1,16 +1,11 @@
-import json
-import torch
 import argparse
-import datetime
 from warnings import warn
-from tqdm import tqdm
 import torch.nn as nn
-import os
 import numpy as np
 
 from wsd.classifier_pretrain import TextClassifierPretrain
 from wsd.model.transformer_pretrain import MyTransformer
-from wsd.utils_pretrain import get_linear_schedule_with_warmup
+from wsd.utils import *
 
 
 if __name__ == '__main__':
@@ -24,7 +19,7 @@ if __name__ == '__main__':
     config_parser.add_argument('--seed', type=int, default=2,
                                help='random seed for number generator (default: 2)')
     config_parser.add_argument('--epochs', type=int, default=40,
-                               help='maximum number of epochs (default: 100)')
+                               help='maximum number of epochs (default: 40)')
     config_parser.add_argument('--batch_size', type=int, default=16,
                                help='batch size (default: 16).')
     config_parser.add_argument('--valid_split', type=float, default=0.30,
@@ -35,9 +30,6 @@ if __name__ == '__main__':
                                help='maximum value for the gradient norm (default: 1.0)')
     config_parser.add_argument("--max_char_voc_size", type=int, default=None,
                                help='maximal size of the character vocabulary (default: None)')
-    config_parser.add_argument("--bag_of_chars", type=bool, default=True,
-                               help='Use bag of chars for transformers instead of [words in doc, chars in word] '
-                                    '(default: True)')
     config_parser.add_argument("--max_token", type=int, default=1_000_000,
                                help='maximal number of used tokens for pretraining (default: tbd). '
                                     'Max 103 mio for words.')
@@ -50,9 +42,9 @@ if __name__ == '__main__':
     config_parser.add_argument('--seq_length', type=int, default=128,
                                help="Transformer training fixed sequence length. Default is 128.")
     config_parser.add_argument('--num_heads', type=int, default=8,
-                               help="Number of attention heads. Default is 4.")
+                               help="Number of attention heads. Default is 8.")
     config_parser.add_argument('--num_trans_layers', type=int, default=4,
-                               help="Number of transformer blocks. Default is 3.")
+                               help="Number of transformer blocks. Default is 4.")
     config_parser.add_argument('--emb_dim', type=int, default=128,
                                help="Internal dimension of transformer. Default is 128.")
     config_parser.add_argument('--dim_inner', type=int, default=256,
@@ -60,7 +52,7 @@ if __name__ == '__main__':
     config_parser.add_argument('--dropout_trans', type=float, default=0.1,
                                help='dropout rate of transformer (default: 0.1).')
     config_parser.add_argument('--activation_trans', choices=['relu', 'gelu'], default='gelu',
-                               help='activation function of transformer (default: relu).')
+                               help='activation function of transformer (default: gelu).')
     config_parser.add_argument('--perc_masked_token', type=float, default=0.15,
                                help="Percentage of total masked token. Default is 0.15.")
     args, rem_args = config_parser.parse_known_args()
@@ -91,23 +83,12 @@ if __name__ == '__main__':
     # Set device
     device = torch.device('cuda:0' if settings.cuda else 'cpu')
 
-    # Set output folder and save config
-    if settings.folder[-1] == '/':
-        folder = os.path.join(settings.folder, 'output_' +
-                              str(datetime.datetime.now()).replace(":", "_").replace(" ", "_").replace(".", "_"))
-    else:
-        folder = settings.folder
-    # Create output folder if needed
-    try:
-        os.makedirs(folder)
-    except FileExistsError:
-        pass
-    with open(os.path.join(folder, 'pretrain_config.json'), 'w') as f:
-        json.dump(vars(args), f, indent='\t')
-
     # Set seed
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+
+    # Set output folder and save config
+    folder = define_folder(settings, args)
 
     tqdm.write("Done!")
     ###################################
@@ -124,9 +105,8 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Load data and pre-process...")
 
-    path_finetuning = os.path.join(settings.data_folder, settings.data_file_train)
     path_pretrain = os.path.join(settings.data_folder, 'pretrain')
-    train_loader, valid_loader = clf.preprocess(path_finetuning, path_pretrain, folder)
+    train_loader, valid_loader = clf.preprocess(path_pretrain, folder)
 
     tqdm.write("Done!")
     ###################################
@@ -156,17 +136,7 @@ if __name__ == '__main__':
             "weight_decay": 0.0,
         },
     ]
-    #adam_beta1 = 0.9
-    #adam_beta2 = 0.999
-    #learning_rate = 5e-5
-    #adam_epsilon = 1e-8
-    optimizer = torch.optim.AdamW(
-        optimizer_grouped_parameters,
-        lr=args.lr,
-        #betas=(adam_beta1, adam_beta2),
-        #eps=adam_epsilon,
-    )
-    # optimizer = torch.optim.Adam(clf.model.parameters(), args.lr)
+    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.lr)
     clf.optimizer = optimizer
 
     tqdm.write("Done!")
@@ -175,10 +145,11 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define scheduler...")
 
+    # number of training steps
     temp = 1 if len(train_loader.dataset.x) % args.batch_size != 0 else 0
     num_training_steps = len(train_loader.dataset.x)//args.batch_size + temp
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_training_steps=num_training_steps)
-    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.lr_factor)
+    # scheduler
+    scheduler = get_linear_schedule(optimizer, num_training_steps=num_training_steps)
     clf.scheduler = scheduler
 
     tqdm.write("Done!")

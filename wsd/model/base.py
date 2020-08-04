@@ -1,5 +1,4 @@
-import torch
-import torch.nn as nn
+from tqdm import tqdm
 from wsd.model.simple_clf import *
 
 
@@ -130,4 +129,5 @@ def get_model(config, clf_input, pretrain_stage_config=None, pretrain_stage_ckpt
         # combine model
         model = MyBiSequential(ptr_mdl_char, ptr_mdl_word, clf, con_dim=1)
 
+    tqdm.write("...choosing {}...".format(config['model_type']))
     return model

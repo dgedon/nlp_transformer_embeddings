@@ -1,16 +1,14 @@
 # Generic imports
 import torch
-import os
 import argparse
 from tqdm import tqdm
 from warnings import warn
-import datetime
-import json
 import numpy as np
 
 # user defined inputs
 from wsd.classifier import TextClassifier, make_predictions
 from wsd.model.base import get_model
+from wsd.utils import *
 
 if __name__ == '__main__':
     ###################################
@@ -24,26 +22,24 @@ if __name__ == '__main__':
     config_parser.add_argument('--seed', type=int, default=2,
                                help='random seed for number generator (default: 2)')
     config_parser.add_argument('--epochs', type=int, default=100,
-                               help='maximum number of epochs (default: 200)')
+                               help='maximum number of epochs (default: 100)')
     config_parser.add_argument('--batch_size', type=int, default=16,
                                help='batch size (default: 16).')
-    config_parser.add_argument('--valid_split', type=float, default=0.30,
+    config_parser.add_argument('--valid_split', type=float, default=0.3,
                                help='fraction of the data used for validation (default: 0.3).')
-    config_parser.add_argument('--lr', type=float, default=1e-3,
-                               help='learning rate (default: 1e-5)')
-    config_parser.add_argument('--milestones', nargs='+', type=int, default=[40, 60, 80],
-                               help='milestones for lr scheduler (default: [40, 60, 80])')
-    config_parser.add_argument("--lr_factor", type=float, default=0.1,
-                               help='reducing factor for the lr in a plateau (default: 0.333)')
+    config_parser.add_argument('--lr_simple', type=float, default=1e-3,
+                               help='learning rate (default: 1e-1)')
+    config_parser.add_argument('--lr_finetune', type=float, default=5e-5,
+                               help='learning rate (default: 5e-5)')
     # Model parameters
     config_parser.add_argument("--model_type", choices=['simple_word', 'simple_char', 'simple_word_char',
                                                         'transformer_word', 'transformer_char', 'transformer_word_char'],
-                               default='transformer_word',
+                               default='simple_word',
                                help='model type.')
     config_parser.add_argument('--seq_length_words', type=int, default=128,
                                help="Transformer training fixed word sequence length. Default is 128.")
-    config_parser.add_argument('--seq_length_chars', type=int, default=256,
-                               help="Transformer training fixed char sequence length. Default is 256.")
+    config_parser.add_argument('--seq_length_chars', type=int, default=512,
+                               help="Transformer training fixed char sequence length. Default is 512.")
     config_parser.add_argument("--max_char_voc_size", type=int, default=None,
                                help='maximal size of the character vocabulary (default: None)')
     config_parser.add_argument("--emb_dim", type=int, default=128,
@@ -68,7 +64,7 @@ if __name__ == '__main__':
                             help='data file for validation.')
     sys_parser.add_argument('--cuda', action='store_true',
                             help='use cuda for computations. (default: False)')
-    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/', # '/wsd/server/pretrain_word',  #
+    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/',  # '/wsd/server/pretrain_word',  #
                             help='output folder. If we pass /PATH/TO/FOLDER/ ending with `/`,'
                                  'it creates a folder `output_YYYY-MM-DD_HH_MM_SS_MMMMMM` inside it'
                                  'and save the content inside it. If it does not ends with `/`, the content is saved'
@@ -86,52 +82,18 @@ if __name__ == '__main__':
     # Set device
     device = torch.device('cuda:0' if settings.cuda else 'cpu')
 
-    # Generate output folder if needed and save config file
-    if settings.folder[-1] == '/':
-        folder = os.path.join(settings.folder, 'output_' +
-                              str(datetime.datetime.now()).replace(":", "_").replace(" ", "_").replace(".", "_"))
-    else:
-        folder = settings.folder
-    try:
-        os.makedirs(folder)
-    except FileExistsError:
-        pass
-    with open(os.path.join(folder, 'config.json'), 'w') as f:
-        json.dump(vars(args), f, indent='\t')
-    # Check if there is pretrained model in the given folder
-    try:
-        if args.model_type.lower() in ['simple_word', 'simple_word_char', 'simple_char']:
-            raise Exception('no pretrained simple embedding model')
-        ckpt_pretrain_stage = torch.load(os.path.join(folder, 'pretrain_model.pth'),
-                                         map_location=lambda storage, loc: storage)
-        config_pretrain_stage = os.path.join(folder, 'pretrain_config.json')
-        with open(config_pretrain_stage, 'r') as f:
-            config_dict_pretrain_stage = json.load(f)
-        tqdm.write("Found pretrained model!")
-        # adapt some parameters
-        args.max_voc_size = config_dict_pretrain_stage['max_voc_size']
-        args.bag_of_chars = True
-        args.tokenizer = config_dict_pretrain_stage['tokenizer']
-    except:
-        ckpt_pretrain_stage = None
-        config_dict_pretrain_stage = None
-        pretrain_ids = []
-        tqdm.write("Did not found pretrained model!")
-        args.bag_of_chars = False
-    # check for possible second model (char model)
-    if settings.folder_model2[-1] != '/' and args.model_type.lower() == 'transformer_word_char':
-        ckpt_pretrain2_stage = torch.load(os.path.join(settings.folder_model2, 'pretrain_model.pth'),
-                                          map_location=lambda storage, loc: storage)
-        config_pretrain2_stage = os.path.join(folder, 'pretrain_config.json')
-        with open(config_pretrain2_stage, 'r') as f:
-            config_dict_pretrain2_stage = json.load(f)
-        # combine both pretrain configs in a tuple
-        ckpt_pretrain_stage = (ckpt_pretrain_stage, ckpt_pretrain2_stage)
-        config_dict_pretrain_stage = (config_dict_pretrain_stage, config_dict_pretrain2_stage)
-
     # Set seed
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+
+    # select learning rate depending on model
+    args.lr = args.lr_finetune if args.model_type.startswith('transformer') else args.lr_simple
+
+    # Generate output folder if needed and save config file
+    folder = define_folder(settings, args)
+
+    # Check if there is pretrained model in the given folder
+    ckpt_pretrain_stage, config_dict_pretrain_stage = check_pretrained_model(args, settings, folder)
 
     tqdm.write("Done!")
     ###################################
@@ -159,13 +121,13 @@ if __name__ == '__main__':
     model.to(device=device)
     clf.set_model(model)
 
-    tqdm.write("Done by choosing {}!".format(args.model_type))
+    tqdm.write("Done!")
     ###################################
     # Define the optimizer
     ###################################
     tqdm.write("Define optimizer...")
 
-    optimizer = torch.optim.Adam(model.parameters(), args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     clf.optimizer = optimizer
 
     tqdm.write("Done!")
@@ -174,7 +136,12 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define scheduler...")
 
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.lr_factor)
+    # number of training steps
+    temp = 1 if len(train_loader.dataset.x) % args.batch_size != 0 else 0
+    num_training_steps = len(train_loader.dataset.x) // args.batch_size + temp
+    # scheduler
+    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.lr_factor)
+    scheduler = get_linear_schedule(optimizer, num_training_steps=num_training_steps)
     clf.scheduler = scheduler
 
     tqdm.write("Done!")
