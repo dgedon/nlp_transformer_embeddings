@@ -56,7 +56,7 @@ class TextClassifierPretrain:
             tqdm.write("...Vocabulary built (size {:})...".format(len(self.voc)))
             # save vocabulary
             torch.save({'character': self.voc.character,
-                        'max_voc_size': self.voc.max_voc_size,
+                        'max_char_voc_size': len(self.voc),
                         'stoi': self.voc.stoi,
                         'itos': self.voc.itos},
                        os.path.join(folder, 'voc.pth'))

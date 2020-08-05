@@ -16,7 +16,7 @@ def get_linear_schedule(optimizer, num_training_steps, last_epoch=-1):
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
 
-def define_folder(settings, args):
+def define_folder(settings, args, pretrain=False):
     # Generate output folder if needed and save config file
     if settings.folder[-1] == '/':
         folder = os.path.join(settings.folder, 'output_' +
@@ -27,7 +27,11 @@ def define_folder(settings, args):
         os.makedirs(folder)
     except FileExistsError:
         pass
-    with open(os.path.join(folder, 'config.json'), 'w') as f:
+    if pretrain:
+        file_name = 'pretrain_config.json'
+    else:
+        file_name = 'config.json'
+    with open(os.path.join(folder, file_name), 'w') as f:
         json.dump(vars(args), f, indent='\t')
 
     return folder

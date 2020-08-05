@@ -88,7 +88,7 @@ if __name__ == '__main__':
     np.random.seed(args.seed)
 
     # Set output folder and save config
-    folder = define_folder(settings, args)
+    folder = define_folder(settings, args, pretrain=True)
 
     tqdm.write("Done!")
     ###################################

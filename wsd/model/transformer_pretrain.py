@@ -116,12 +116,21 @@ class MyTransformer(nn.Module):
     inspired by https://github.com/pytorch/examples/tree/master/word_language_model
     """
 
-    def __init__(self, args, clf):
+    def __init__(self, args, clf, ischar=False):
         super(MyTransformer, self).__init__()
 
-        self.voc_size = len(clf.voc)
-        self.voc_pad_id = clf.voc.get_pad_idx()
-        self.voc_mask_id = clf.voc.get_mask_idx()
+        # for train.py
+        try:
+            if ischar:
+                self.voc = clf.char_voc
+            else:
+                self.voc = clf.voc
+        except:
+            self.voc = clf.voc
+        # for pretrain.py
+        self.voc_size = len(self.voc)
+        self.voc_pad_id = self.voc.get_pad_idx()
+        self.voc_mask_id = self.voc.get_mask_idx()
 
         self.perc_masked_token = args['perc_masked_token']
 

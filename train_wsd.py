@@ -4,11 +4,12 @@ import argparse
 from tqdm import tqdm
 from warnings import warn
 import numpy as np
+import os
 
 # user defined inputs
 from wsd.classifier import TextClassifier, make_predictions
 from wsd.model.base import get_model
-from wsd.utils import *
+from wsd.utils import define_folder, check_pretrained_model
 
 if __name__ == '__main__':
     ###################################
@@ -31,10 +32,15 @@ if __name__ == '__main__':
                                help='learning rate (default: 1e-1)')
     config_parser.add_argument('--lr_finetune', type=float, default=5e-5,
                                help='learning rate (default: 5e-5)')
+    config_parser.add_argument('--milestones', nargs='+', type=int, default=[40, 60, 80],
+                               help='milestones for lr scheduler (default: [40, 60, 80])')
+    config_parser.add_argument("--lr_factor", type=float, default=0.333,
+                               help='reducing factor for the lr in a plateau (default: 0.333)')
     # Model parameters
     config_parser.add_argument("--model_type", choices=['simple_word', 'simple_char', 'simple_word_char',
-                                                        'transformer_word', 'transformer_char', 'transformer_word_char'],
-                               default='simple_word',
+                                                        'transformer_word', 'transformer_char',
+                                                        'transformer_word_char'],
+                               default='transformer_word_char',
                                help='model type.')
     config_parser.add_argument('--seq_length_words', type=int, default=128,
                                help="Transformer training fixed word sequence length. Default is 128.")
@@ -64,13 +70,14 @@ if __name__ == '__main__':
                             help='data file for validation.')
     sys_parser.add_argument('--cuda', action='store_true',
                             help='use cuda for computations. (default: False)')
-    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/',  # '/wsd/server/pretrain_word',  #
+    sys_parser.add_argument('--folder', default=os.getcwd() + '/wsd/server/pretrain_word_char',  #
                             help='output folder. If we pass /PATH/TO/FOLDER/ ending with `/`,'
                                  'it creates a folder `output_YYYY-MM-DD_HH_MM_SS_MMMMMM` inside it'
                                  'and save the content inside it. If it does not ends with `/`, the content is saved'
                                  'in the folder provided.')
     sys_parser.add_argument('--folder_model2', default=os.getcwd() + '/wsd/server/pretrain_word_char/pretrain_char',  # '/'
-                            help='Folder where second model is stored. Specify as `/` if no second model is used.')
+                            help='Folder where second model (char) is stored. '
+                                 'Specify as `/` if no second model is used.')
     settings, unk = sys_parser.parse_known_args(rem_args)
     #  Final parser is needed for generating help documentation
     parser = argparse.ArgumentParser(parents=[sys_parser, config_parser])
@@ -136,12 +143,7 @@ if __name__ == '__main__':
     ###################################
     tqdm.write("Define scheduler...")
 
-    # number of training steps
-    temp = 1 if len(train_loader.dataset.x) % args.batch_size != 0 else 0
-    num_training_steps = len(train_loader.dataset.x) // args.batch_size + temp
-    # scheduler
-    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.lr_factor)
-    scheduler = get_linear_schedule(optimizer, num_training_steps=num_training_steps)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.milestones, gamma=args.lr_factor)
     clf.scheduler = scheduler
 
     tqdm.write("Done!")

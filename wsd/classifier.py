@@ -37,9 +37,12 @@ class TextClassifier:
             self.voc = Vocabulary(max_voc_size=self.max_voc_size)
             self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True)
         if self.model_type in ['transformer_word', 'transformer_char', 'transformer_word_char']:
+            folder = settings["folder"]
+            if self.model_type in ['transformer_word_char']:
+                folder = settings["folder_model2"]
             try:
-                temp = torch.load(os.path.join(settings["folder"], 'voc.pth'))
-                self.max_char_voc_size = temp['max_voc_size']
+                temp = torch.load(os.path.join(folder, 'voc.pth'))
+                self.max_char_voc_size = temp['max_char_voc_size']
                 self.stoi = temp['stoi']
                 self.itos = temp['itos']
             except:
@@ -47,8 +50,9 @@ class TextClassifier:
                 self.stoi = None
                 self.itos = None
 
-            self.voc = Vocabulary(max_voc_size=self.max_voc_size, stoi=self.stoi, itos=self.itos)
-            self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True)
+            self.voc = Vocabulary(max_voc_size=self.max_voc_size)
+            self.char_voc = Vocabulary(max_voc_size=self.max_char_voc_size, character=True,
+                                       stoi=self.stoi, itos=self.itos)
 
         self.lbl_enc = LabelEncoder()
 
@@ -66,8 +70,9 @@ class TextClassifier:
 
         self.voc_size = len(self.voc)
         tqdm.write("...word vocabulary built (size {:})...".format(self.voc_size))
-        # also build a vocabulary for characters
-        self.char_voc.build(x_train)
+        # also build a vocabulary for characters (only if not pre-loaded)
+        if self.stoi is None:
+            self.char_voc.build(x_train)
         self.char_voc_size = len(self.char_voc)
         tqdm.write("...char vocabulary built (size {:})...".format(self.char_voc_size))
 
@@ -178,8 +183,6 @@ class TextClassifier:
                 loss.backward()
                 # Optimize
                 self.optimizer.step()
-                # scheduler
-                self.scheduler.step()
 
             # Update
             total_loss += loss.detach().cpu().numpy()
@@ -195,6 +198,9 @@ class TextClassifier:
             train_bar.update(bs)
 
         train_bar.close()
+        # Call optimizer step
+        if do_train:
+            self.scheduler.step()
 
         return total_loss / n_instances, n_correct / n_instances
 

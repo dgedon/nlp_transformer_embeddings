@@ -8,5 +8,7 @@ wsd/test.py
 wsd/server/
 wsd/data/pretrain/*
 
+local/*
+
 doc/*
 !doc/nlp_project_danielgedon.pdf

@@ -73,7 +73,7 @@ def get_model(config, clf_input, pretrain_stage_config=None, pretrain_stage_ckpt
         word embedding transformer + simple FF classifier
         """
         # pretrained word model
-        pretrained = MyTransformer(pretrain_stage_config, clf_input)
+        pretrained = MyTransformer(pretrain_stage_config, clf_input, ischar=False)
         if pretrain_stage_ckpt is not None:
             pretrained.load_state_dict(pretrain_stage_ckpt['model'])
         ptr_mdl = pretrained.get_pretrained(config['finetuning'], train_words=True)
@@ -90,7 +90,7 @@ def get_model(config, clf_input, pretrain_stage_config=None, pretrain_stage_ckpt
         char embedding transformer + simple FF classifier
         """
         # pretrained char model
-        pretrained = MyTransformer(pretrain_stage_config, clf_input)
+        pretrained = MyTransformer(pretrain_stage_config, clf_input, ischar=True)
         if pretrain_stage_ckpt is not None:
             pretrained.load_state_dict(pretrain_stage_ckpt['model'])
         ptr_mdl = pretrained.get_pretrained(config['finetuning'])
@@ -111,13 +111,13 @@ def get_model(config, clf_input, pretrain_stage_config=None, pretrain_stage_ckpt
         pretrain_stage_ckpt_word, pretrain_stage_ckpt_char = pretrain_stage_ckpt
 
         # pretrained word model
-        pretrained_word = MyTransformer(pretrain_stage_config_word, clf_input)
+        pretrained_word = MyTransformer(pretrain_stage_config_word, clf_input, ischar=False)
         if pretrain_stage_ckpt_word is not None:
             pretrained_word.load_state_dict(pretrain_stage_ckpt_word['model'])
-        ptr_mdl_word = pretrained_word.get_pretrained(config['finetuning'])
+        ptr_mdl_word = pretrained_word.get_pretrained(config['finetuning'], train_words=True)
 
-        # pretrained word model
-        pretrained_char = MyTransformer(pretrain_stage_config_char, clf_input)
+        # pretrained char model
+        pretrained_char = MyTransformer(pretrain_stage_config_char, clf_input, ischar=True)
         if pretrain_stage_ckpt_char is not None:
             pretrained_char.load_state_dict(pretrain_stage_ckpt_char['model'])
         ptr_mdl_char = pretrained_char.get_pretrained(config['finetuning'])
@@ -127,7 +127,7 @@ def get_model(config, clf_input, pretrain_stage_config=None, pretrain_stage_ckpt
         clf = ModelSimpleClf(config, inp_dim, n_classes)
 
         # combine model
-        model = MyBiSequential(ptr_mdl_char, ptr_mdl_word, clf, con_dim=1)
+        model = MyBiSequential(ptr_mdl_word, ptr_mdl_char, clf, con_dim=1)
 
-    tqdm.write("...choosing {}...".format(config['model_type']))
+    tqdm.write("...choosing model {}...".format(config['model_type']))
     return model
